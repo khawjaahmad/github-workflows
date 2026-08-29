@@ -34,6 +34,11 @@ def report_turn(status="PASS", call_id="call_report", **extra):
     return {"content": None, "tool_calls": [tool_call("submit_report", arguments, call_id)]}
 
 
+def completion_turn(message, finish_reason="", usage=None):
+    """A turn that also carries the response metadata the agent reacts to."""
+    return {"message": message, "finish_reason": finish_reason, "usage": usage or {}}
+
+
 def bash_turn(command, call_id="call_1"):
     return {"content": None, "tool_calls": [tool_call("bash", {"command": command}, call_id)]}
 
@@ -107,7 +112,19 @@ class LLMServer(_Server):
             status, payload = turn
             self.reply(handler, status, payload)
             return
-        self.reply(handler, 200, {"choices": [{"message": turn}]})
+        # A turn is either a bare assistant message, or a wrapper carrying the
+        # finish_reason and usage the real API returns alongside it.
+        if "message" in turn:
+            payload = {
+                "choices": [
+                    {"message": turn["message"], "finish_reason": turn.get("finish_reason", "")}
+                ]
+            }
+            if turn.get("usage"):
+                payload["usage"] = turn["usage"]
+            self.reply(handler, 200, payload)
+            return
+        self.reply(handler, 200, {"choices": [{"message": turn, "finish_reason": "stop"}]})
 
     @property
     def last_messages(self):
@@ -179,7 +196,7 @@ def make_config(**overrides):
         effort="",
         request_timeout=10,
         time_budget=0,
-        max_context_chars=0,
+        context_tokens=0,
         artifacts_dir="",
         run_url="",
         fail_on=("FAIL",),

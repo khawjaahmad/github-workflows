@@ -5,19 +5,18 @@ from dataclasses import dataclass, field
 
 # Every provider below speaks the OpenAI-compatible `/chat/completions` API.
 # `base_url` is the prefix the endpoint is appended to.
+#
+# Only base URLs live here. Model ids are deliberately absent: they change faster
+# than this action does, and a stale default silently pins every consumer to an
+# old model. The model comes from configuration, alongside the key.
+#
+#   zai     https://docs.z.ai/devpack/quick-start ("OpenAI Chat Completions")
+#   gemini  https://ai.google.dev/gemini-api/docs/openai
+#   openai  https://platform.openai.com/docs/api-reference/chat
 PROVIDERS = {
-    "zai": {
-        "base_url": "https://api.z.ai/api/coding/paas/v4",
-        "model": "glm-5.3",
-    },
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-5",
-    },
-    "gemini": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-pro",
-    },
+    "zai": "https://api.z.ai/api/coding/paas/v4",
+    "openai": "https://api.openai.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
 }
 
 VALID_STATUSES = ("PASS", "FAIL", "PARTIAL")
@@ -44,7 +43,13 @@ class Config:
     effort: str
     request_timeout: int = 600
     time_budget: int = 1500
-    max_context_chars: int = 240000
+    # The model's context window, in tokens. Zero means "not stated": the agent
+    # then compacts only when the provider says the window was exceeded, rather
+    # than guessing a limit for a model it knows nothing about.
+    context_tokens: int = 0
+    # Fraction of that window at which compaction starts, leaving room for the
+    # turn being requested.
+    context_headroom: float = 0.8
     artifacts_dir: str = ""
     run_url: str = ""
     github_api_url: str = "https://api.github.com"
@@ -64,20 +69,16 @@ def _int(name, default):
         raise ConfigError("%s must be a number, got %r" % (name, raw))
 
 
-def _resolve_endpoint(provider, base_url, model):
+def _resolve_endpoint(provider, base_url):
     if provider == "custom":
         if not base_url:
             raise ConfigError("provider 'custom' requires base_url to be set")
     elif provider in PROVIDERS:
-        base_url = base_url or PROVIDERS[provider]["base_url"]
-        model = model or PROVIDERS[provider]["model"]
+        base_url = base_url or PROVIDERS[provider]
     else:
         known = ", ".join(sorted(PROVIDERS) + ["custom"])
         raise ConfigError("unknown provider %r (expected one of: %s)" % (provider, known))
-
-    if not model:
-        raise ConfigError("model must be set for provider %r" % provider)
-    return base_url.rstrip("/"), model
+    return base_url.rstrip("/")
 
 
 def parse_fail_on(raw):
@@ -103,11 +104,19 @@ def parse_fail_on(raw):
 
 def from_env():
     provider = _env("QA_PROVIDER", "zai").lower()
-    base_url, model = _resolve_endpoint(provider, _env("QA_BASE_URL"), _env("QA_MODEL"))
+    base_url = _resolve_endpoint(provider, _env("QA_BASE_URL"))
 
     api_key = _env("QA_API_KEY")
     if not api_key:
         raise ConfigError("QA_API_KEY is empty — set the LLM_API_KEY secret")
+
+    model = _env("QA_MODEL")
+    if not model:
+        raise ConfigError(
+            "QA_MODEL is empty — set the `model` input (for example from an "
+            "LLM_MODEL secret or variable). This action ships no default model id, "
+            "so that it cannot pin you to one that has been superseded."
+        )
 
     repo = _env("QA_REPO")
     if not repo:
@@ -136,7 +145,7 @@ def from_env():
         effort=_env("QA_EFFORT"),
         request_timeout=_int("QA_REQUEST_TIMEOUT", "600"),
         time_budget=_int("QA_TIME_BUDGET", "1500"),
-        max_context_chars=_int("QA_MAX_CONTEXT_CHARS", "240000"),
+        context_tokens=_int("QA_CONTEXT_TOKENS", "0"),
         artifacts_dir=_env("QA_ARTIFACTS_DIR"),
         run_url=_env("QA_RUN_URL"),
         github_api_url=_env("QA_GITHUB_API_URL", "https://api.github.com").rstrip("/"),

@@ -11,15 +11,17 @@ inputs:
   provider:
     description: >-
       Which OpenAI-compatible endpoint to use: zai (z.ai coding plan), openai,
-      gemini, or custom. With `custom` you must also set `base_url` and `model`.
+      gemini, or custom. Selects the base URL; with `custom` you must set
+      `base_url` yourself.
     required: false
     default: zai
   model:
     description: >-
-      Model id. Defaults per provider — zai: glm-5.3, openai: gpt-5,
-      gemini: gemini-2.5-pro.
-    required: false
-    default: ""
+      Model id — required. This action ships no default: model ids change faster
+      than the action does, and a default here would quietly pin you to a
+      superseded model. Store it alongside the key (an LLM_MODEL secret or
+      variable) so both move together.
+    required: true
   base_url:
     description: >-
       Override the OpenAI-compatible base URL that `/chat/completions` is
@@ -42,10 +44,10 @@ inputs:
     default: ${{ github.api_url }}
   effort:
     description: >-
-      Reasoning effort, sent as `reasoning_effort` and passed through verbatim.
-      Each provider has its own levels — z.ai glm-5.3: low, high, max (default
-      max); OpenAI: low, medium, high, xhigh. Leave empty to use the model's
-      own default.
+      Reasoning effort, sent as `reasoning_effort` and passed through verbatim
+      without validation, because the accepted levels differ by provider and
+      change with each model release. Check your provider's documentation for
+      the levels your model takes. Leave empty to use the model's own default.
     required: false
     default: ""
   setup_command:
@@ -71,12 +73,14 @@ inputs:
     description: Timeout in seconds for each request to the model endpoint.
     required: false
     default: "600"
-  max_context_chars:
+  context_tokens:
     description: >-
-      Approximate size of the conversation, in characters, before the oldest
-      command output is elided. Lower it for a model with a small context window.
+      The model's context window in tokens. Set it and the agent compacts the
+      transcript before it gets close, using the prompt token count the provider
+      reports. Left at 0 it does not guess: it compacts only when a response
+      comes back saying the window was exceeded.
     required: false
-    default: "240000"
+    default: "0"
   post_comment:
     description: Post the report as a PR comment. Set to false to only log it.
     required: false
@@ -135,7 +139,7 @@ runs:
         QA_TIME_BUDGET: ${{ inputs.time_budget }}
         QA_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
         QA_REQUEST_TIMEOUT: ${{ inputs.request_timeout }}
-        QA_MAX_CONTEXT_CHARS: ${{ inputs.max_context_chars }}
+        QA_CONTEXT_TOKENS: ${{ inputs.context_tokens }}
         QA_POST_COMMENT: ${{ inputs.post_comment }}
         QA_FAIL_ON: ${{ inputs.fail_on }}
         QA_ARTIFACTS_DIR: ${{ runner.temp }}/qa-artifacts

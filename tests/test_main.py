@@ -24,6 +24,7 @@ class MainTest(unittest.TestCase):
         os.environ.update(
             {
                 "QA_API_KEY": "k",
+                "QA_MODEL": "stub-model",
                 "QA_REPO": "acme/widget",
                 "QA_PR_NUMBER": "7",
                 "QA_WORKSPACE": self.temp,
@@ -109,19 +110,21 @@ class MainTest(unittest.TestCase):
 
 
 class DiffBudgetTest(unittest.TestCase):
-    def config(self, max_context_chars):
+    def config(self, context_tokens):
         return config_module.Config(
             api_key="k", base_url="u", model="m", provider="zai", github_token="t",
             repo="a/b", pr_number=1, workspace=".", max_turns=1, command_timeout=1,
             post_comment=False, setup_command="", effort="",
-            max_context_chars=max_context_chars,
+            context_tokens=context_tokens,
         )
 
     def test_the_diff_never_takes_the_whole_context(self):
-        self.assertEqual(entry._diff_budget(self.config(240000)), 80000)
-        self.assertEqual(entry._diff_budget(self.config(30000)), 20000)
+        # Unknown window: a flat cap, as before.
         self.assertEqual(entry._diff_budget(self.config(0)), 120000)
-        self.assertEqual(entry._diff_budget(self.config(9000000)), 120000)
+        # A small window keeps the diff to a floor it can still work with.
+        self.assertEqual(entry._diff_budget(self.config(20000)), 20000)
+        # A large one is capped, so the diff never crowds out the run.
+        self.assertEqual(entry._diff_budget(self.config(1000000)), 120000)
 
 
 if __name__ == "__main__":

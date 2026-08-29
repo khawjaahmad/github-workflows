@@ -1,5 +1,6 @@
 """The agent loop: talk to the model, run its tool calls, collect the report."""
 
+import signal
 import sys
 import time
 
@@ -11,6 +12,20 @@ GRACE_TURNS = 2
 # How much of the command trail to quote when the agent never reported itself.
 TRAIL_LIMIT = 20
 
+# Characters per token, used only to turn a token budget into the character
+# budget compaction works in. Deliberately pessimistic: over-compacting costs
+# some context, under-compacting costs the whole request.
+CHARS_PER_TOKEN = 3
+
+# Signals that mean "stop now": the runner sends SIGTERM before it kills a job
+# that has run out of time, and an agent poking at process management can signal
+# itself by accident.
+TERMINATION_SIGNALS = {"SIGTERM": None, "SIGINT": None}
+
+
+class Interrupted(Exception):
+    """The run was signalled to stop before the agent had reported."""
+
 
 def log(message):
     print(message, flush=True)
@@ -20,10 +35,62 @@ def log(message):
 def run(config, pull_request, diff):
     """Drive the agent until it submits a report or runs out of budget.
 
-    Always returns (status, markdown_body): a run that fails, stalls or times out
-    still produces a report, because a pull request with no QA comment and a red
-    check tells the author nothing.
+    Always returns (status, markdown_body): a run that fails, stalls, times out
+    or is killed still produces a report, because a pull request with no QA
+    comment and a red check tells the author nothing.
     """
+    trail = []
+    restore = _trap_termination()
+    try:
+        return _loop(config, pull_request, diff, trail)
+    except Interrupted as error:
+        log(str(error))
+        return _fallback(config, str(error), trail)
+    finally:
+        restore()
+
+
+def _trap_termination():
+    """Turn a termination signal into a report instead of a dead job.
+
+    Returns a callable that puts the previous handlers back.
+    """
+
+    def handle(number, _frame):
+        raise Interrupted(
+            "the run was stopped by %s — a job timeout, or a command that killed "
+            "this process" % _signal_name(number)
+        )
+
+    previous = {}
+    for name in TERMINATION_SIGNALS:
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        try:
+            previous[number] = signal.signal(number, handle)
+        except (ValueError, OSError):
+            # Not the main thread, or the platform does not allow it.
+            continue
+
+    def restore():
+        for number, handler in previous.items():
+            try:
+                signal.signal(number, handler)
+            except (ValueError, OSError):
+                pass
+
+    return restore
+
+
+def _signal_name(number):
+    try:
+        return signal.Signals(number).name
+    except ValueError:
+        return "signal %s" % number
+
+
+def _loop(config, pull_request, diff, trail):
     tool_definitions = tools.definitions(config.command_timeout)
     messages = [
         {"role": "system", "content": prompt.SYSTEM_PROMPT},
@@ -31,10 +98,11 @@ def run(config, pull_request, diff):
     ]
 
     deadline = time.monotonic() + config.time_budget if config.time_budget > 0 else None
-    trail = []
     winding_down = None
     grace = GRACE_TURNS
     turn = 0
+    prompt_tokens = 0
+    overflows = 0
 
     while True:
         turn += 1
@@ -49,29 +117,56 @@ def run(config, pull_request, diff):
         if winding_down:
             grace -= 1
 
-        messages = history.compact(messages, config.max_context_chars)
+        messages = history.compact(messages, _budget(config, prompt_tokens))
         try:
-            message = llm.complete(config, messages, tool_definitions)
+            completion = llm.complete(config, messages, tool_definitions)
         except llm.LLMError as error:
             # The endpoint is gone or the request is unacceptable. Retrying is
             # llm.complete's job and it already did; report what we have.
             log("model endpoint failed: %s" % error)
             return _fallback(config, "the model endpoint failed: %s" % error, trail)
+
+        prompt_tokens = completion.prompt_tokens or prompt_tokens
+        message = completion.message
+
+        # A context overflow arrives as a successful response, not an error. Left
+        # unhandled it looks like a turn that simply called no tools, and the loop
+        # would nudge the model until the budget ran out.
+        if completion.overflowed:
+            log("[turn %d] the model reports the context window was exceeded" % turn)
+            if overflows >= 1:
+                return _fallback(
+                    config, "the context window was exceeded and compacting did not "
+                    "recover it", trail
+                )
+            overflows += 1
+            messages = history.compact(messages, _shrink(messages))
+            continue
+
+        if completion.blocked:
+            return _fallback(
+                config,
+                "the provider stopped the response (finish_reason: %s)"
+                % completion.finish_reason,
+                trail,
+            )
+
         messages.append(message)
 
         if message["content"]:
             log("[turn %d] %s" % (turn, message["content"]))
 
+        if completion.truncated:
+            log("[turn %d] the response was truncated at the output limit" % turn)
+
         calls = message.get("tool_calls")
         if not calls:
-            # A model that stops calling tools has nothing left to contribute; nudge
-            # it once toward the report rather than ending without a verdict.
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Continue testing, or call submit_report if you are done.",
-                }
-            )
+            # Nothing to run. A truncated turn was cut off before it got to its
+            # tool call, which is worth naming; otherwise the model has simply
+            # stopped, and a nudge beats ending with no verdict. Either way the
+            # reply must come after the tool results, never instead of them —
+            # an assistant turn with unanswered tool_call ids is rejected.
+            messages.append({"role": "user", "content": _nudge(completion)})
             continue
 
         for call in calls:
@@ -97,6 +192,40 @@ def run(config, pull_request, diff):
                 continue
 
             messages.append(_tool_result(call, "error: unknown tool %r" % name))
+
+
+TRUNCATED_NUDGE = (
+    "Your last response was cut off at the output limit before you called a tool. "
+    "Keep replies short: make one tool call at a time, and save long prose for "
+    "submit_report."
+)
+CONTINUE_NUDGE = "Continue testing, or call submit_report if you are done."
+
+
+def _nudge(completion):
+    return TRUNCATED_NUDGE if completion.truncated else CONTINUE_NUDGE
+
+
+def _budget(config, prompt_tokens):
+    """The character budget for compaction, or 0 while there is no reason to.
+
+    The provider reports how many prompt tokens the last request actually used,
+    so the only guess left is the model's window — and that is stated by the
+    `context_tokens` input rather than assumed. Without it the agent does not
+    compact speculatively; it waits for the provider to say the window was
+    exceeded, and compacts then.
+    """
+    if config.context_tokens <= 0:
+        return 0
+    ceiling = int(config.context_tokens * config.context_headroom)
+    if prompt_tokens and prompt_tokens < ceiling:
+        return 0
+    return ceiling * CHARS_PER_TOKEN
+
+
+def _shrink(messages):
+    """A budget that forces compaction to actually give something up."""
+    return max(4000, history.size(messages) // 2)
 
 
 def _budget_spent(turn, config, deadline):

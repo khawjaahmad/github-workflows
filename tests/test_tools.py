@@ -81,6 +81,15 @@ class RunBashTest(unittest.TestCase):
             # Signal 0 only checks existence: nothing is left holding a port open.
             os.kill(orphan, 0)
 
+    def test_a_fast_command_after_a_timeout_is_not_itself_reported_as_timed_out(self):
+        tools.run_bash("sleep 30", self.workspace, timeout=1)
+
+        result = tools.run_bash("echo quick", self.workspace, timeout=30)
+
+        self.assertIn("exit code: 0", result)
+        self.assertIn("quick", result)
+        self.assertNotIn("timed out", result)
+
     def test_exit_code_is_reported(self):
         self.assertIn("exit code: 3", tools.run_bash("exit 3", self.workspace, timeout=10))
 

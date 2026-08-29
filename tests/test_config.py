@@ -8,7 +8,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from qa_agent import config as config_module  # noqa: E402
 
-REQUIRED = {"QA_API_KEY": "k", "QA_REPO": "acme/widget", "QA_PR_NUMBER": "7"}
+REQUIRED = {
+    "QA_API_KEY": "k",
+    "QA_MODEL": "some-model",
+    "QA_REPO": "acme/widget",
+    "QA_PR_NUMBER": "7",
+}
 
 
 class FromEnvTest(unittest.TestCase):
@@ -23,23 +28,31 @@ class FromEnvTest(unittest.TestCase):
         os.environ.clear()
         os.environ.update(self.original)
 
-    def test_provider_defaults(self):
-        config = config_module.from_env()
-        self.assertEqual(config.base_url, "https://api.z.ai/api/coding/paas/v4")
-        self.assertEqual(config.model, "glm-5.3")
+    def test_provider_selects_the_base_url(self):
+        self.assertEqual(
+            config_module.from_env().base_url, "https://api.z.ai/api/coding/paas/v4"
+        )
 
-    def test_model_overrides_the_provider_default(self):
-        os.environ.update({"QA_PROVIDER": "gemini", "QA_MODEL": "gemini-2.5-flash"})
-        config = config_module.from_env()
-        self.assertEqual(config.base_url, "https://generativelanguage.googleapis.com/v1beta/openai")
-        self.assertEqual(config.model, "gemini-2.5-flash")
+        os.environ["QA_PROVIDER"] = "gemini"
+        self.assertEqual(
+            config_module.from_env().base_url,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+
+    def test_the_model_always_comes_from_configuration(self):
+        # No provider ships a default model id: they go stale faster than this
+        # action does, and a stale default silently pins every consumer.
+        os.environ["QA_MODEL"] = ""
+        with self.assertRaises(config_module.ConfigError) as raised:
+            config_module.from_env()
+        self.assertIn("QA_MODEL is empty", str(raised.exception))
 
     def test_custom_provider_needs_a_base_url(self):
         os.environ["QA_PROVIDER"] = "custom"
         with self.assertRaises(config_module.ConfigError):
             config_module.from_env()
 
-        os.environ.update({"QA_BASE_URL": "https://gateway.internal/v1/", "QA_MODEL": "mine"})
+        os.environ["QA_BASE_URL"] = "https://gateway.internal/v1/"
         self.assertEqual(config_module.from_env().base_url, "https://gateway.internal/v1")
 
     def test_unknown_provider_is_rejected(self):
@@ -72,7 +85,7 @@ class FromEnvTest(unittest.TestCase):
         self.assertEqual(config.command_timeout, 300)
         self.assertEqual(config.request_timeout, 600)
         self.assertEqual(config.time_budget, 1500)
-        self.assertEqual(config.max_context_chars, 240000)
+        self.assertEqual(config.context_tokens, 0)
         self.assertEqual(config.fail_on, ("FAIL",))
         self.assertTrue(config.post_comment)
 

@@ -43,11 +43,15 @@ def main():
     return 1 if status in config.fail_on else 0
 
 
+DIFF_CHARS = 120000
+
+
 def _diff_budget(config):
     """Keep the diff from crowding out the run that has to follow it."""
-    if config.max_context_chars <= 0:
-        return 120000
-    return max(20000, min(120000, config.max_context_chars // 3))
+    if config.context_tokens <= 0:
+        return DIFF_CHARS
+    window = config.context_tokens * agent.CHARS_PER_TOKEN
+    return max(20000, min(DIFF_CHARS, window // 8))
 
 
 def _publish(config, status, body):

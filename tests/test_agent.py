@@ -1,6 +1,7 @@
 """The agent loop, against a stubbed OpenAI-compatible server."""
 
 import os
+import signal
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from support import (  # noqa: E402
     PULL_REQUEST,
     LLMServer,
     bash_turn,
+    completion_turn,
     make_config,
     report_turn,
     tool_call,
@@ -20,7 +22,9 @@ from support import (  # noqa: E402
 from qa_agent import agent  # noqa: E402
 
 
-class AgentTest(unittest.TestCase):
+class AgentTestCase(unittest.TestCase):
+    """Helpers only — no tests, so subclasses do not re-run them."""
+
     def serve(self, turns):
         server = LLMServer(turns).start()
         self.addCleanup(server.server_close)
@@ -31,6 +35,8 @@ class AgentTest(unittest.TestCase):
         overrides.setdefault("workspace", tempfile.mkdtemp())
         return make_config(base_url=server.url + "/v1", **overrides)
 
+
+class AgentTest(AgentTestCase):
     def test_runs_commands_then_reports(self):
         server = self.serve([bash_turn("echo hello-from-qa"), report_turn("PASS")])
 
@@ -99,7 +105,7 @@ class AgentTest(unittest.TestCase):
         self.assertIn("call submit_report", server.requests[1]["messages"][-1]["content"])
 
 
-class WindDownTest(AgentTest):
+class WindDownTest(AgentTestCase):
     """The agent must always come back with a report."""
 
     def test_turn_budget_triggers_a_final_call_and_the_model_reports(self):
@@ -140,7 +146,7 @@ class WindDownTest(AgentTest):
         self.assertEqual(agent._timeout(None, make_config(command_timeout=30), None), 30)
 
 
-class EndpointFailureTest(AgentTest):
+class EndpointFailureTest(AgentTestCase):
     """A provider that fails must not cost the reviewer their report."""
 
     def setUp(self):
@@ -158,17 +164,190 @@ class EndpointFailureTest(AgentTest):
         self.assertIn("echo setup-worked", body)
 
     def test_a_rejected_request_is_not_retried_but_is_reported(self):
-        server = self.serve([(400, {"error": {"message": "context length exceeded"}})])
+        # 1261 is z.ai's "Prompt too long". https://docs.z.ai/api-reference/api-code
+        server = self.serve([(400, {"error": {"code": "1261", "message": "Prompt too long"}})])
 
         status, body = agent.run(self.config(server), PULL_REQUEST, "")
 
         self.assertEqual(status, "PARTIAL")
         self.assertIn("HTTP 400", body)
-        self.assertIn("max_context_chars", body)
+        self.assertIn("context_tokens", body)
         self.assertEqual(len(server.requests), 1)
 
+    def test_an_exhausted_quota_is_not_retried(self):
+        # z.ai returns 429 for quota and plan problems as well as rate limits;
+        # only the rate limits are worth retrying. Codes 1308-1321 are quota.
+        server = self.serve(
+            [(429, {"error": {"code": "1310", "message": "Weekly Limit Exhausted"}})]
+        )
 
-class ContextTest(AgentTest):
+        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertEqual(len(server.requests), 1)
+        self.assertIn("quota or subscription limit", body)
+
+    def test_a_real_rate_limit_is_retried(self):
+        server = self.serve(
+            [(429, {"error": {"code": "1302", "message": "Rate limit reached"}}),
+             report_turn("PASS")]
+        )
+
+        status, _ = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PASS")
+        self.assertEqual(len(server.requests), 2)
+
+
+class TerminationTest(AgentTestCase):
+    """A killed run must still report — this is how PR #3 was lost."""
+
+    def test_a_command_that_kills_the_agent_still_produces_a_report(self):
+        # The agent tidying up strays with `pkill -f "python -m qa_agent"` matches
+        # its own process. Verbatim from the run that exited 143 with no comment.
+        server = self.serve(
+            [
+                bash_turn("echo setup-worked", "call_1"),
+                bash_turn("kill -TERM %d" % os.getpid(), "call_2"),
+                report_turn("PASS"),
+            ]
+        )
+
+        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertIn("stopped by SIGTERM", body)
+        self.assertIn("echo setup-worked", body)
+
+    def test_the_previous_handlers_are_restored(self):
+        before = signal.getsignal(signal.SIGTERM)
+        agent.run(self.config(self.serve([report_turn("PASS")])), PULL_REQUEST, "")
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+
+class ProviderBehaviourTest(AgentTestCase):
+    """Behaviours the provider documents, which the loop has to honour."""
+
+    def test_reasoning_content_is_returned_to_the_provider_unmodified(self):
+        # z.ai's Preserved Thinking is on by default for the coding-plan endpoint
+        # and wants reasoning blocks back "full, unmodified, and correctly
+        # ordered". https://docs.z.ai/guides/capabilities/thinking-mode
+        thought = "The endpoint is new, so I should curl it before trusting the diff."
+        server = self.serve(
+            [
+                {
+                    "content": "Checking.",
+                    "reasoning_content": thought,
+                    "tool_calls": [tool_call("bash", {"command": "true"}, "call_1")],
+                },
+                report_turn("PASS"),
+            ]
+        )
+
+        agent.run(self.config(server), PULL_REQUEST, "")
+
+        echoed = [m for m in server.last_messages if m.get("reasoning_content")]
+        self.assertEqual(len(echoed), 1)
+        self.assertEqual(echoed[0]["reasoning_content"], thought)
+
+    def test_a_context_overflow_is_recognised_and_compacted(self):
+        # The overflow arrives as a 200, not an error.
+        # https://docs.z.ai/api-reference/llm/chat-completion
+        server = self.serve(
+            [
+                bash_turn("echo one", "call_1"),
+                completion_turn({"content": ""}, finish_reason="model_context_window_exceeded"),
+                report_turn("PASS"),
+            ]
+        )
+
+        status, _ = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PASS")
+        self.assertEqual(len(server.requests), 3)
+
+    def test_a_context_overflow_that_compacting_cannot_fix_is_reported(self):
+        server = self.serve(
+            [completion_turn({"content": ""}, finish_reason="model_context_window_exceeded")] * 2
+        )
+
+        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertIn("context window was exceeded", body)
+
+    def test_a_truncated_response_is_named_rather_than_read_as_silence(self):
+        server = self.serve(
+            [
+                completion_turn({"content": "I was about to run"}, finish_reason="length"),
+                report_turn("PASS"),
+            ]
+        )
+
+        agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertIn("cut off at the output limit", server.last_messages[-1]["content"])
+
+    def test_a_truncated_turn_that_still_called_a_tool_is_run_normally(self):
+        # Appending a user message after an assistant turn with unanswered
+        # tool_call ids makes the next request invalid.
+        truncated = {
+            "content": "Running it",
+            "tool_calls": [tool_call("bash", {"command": "echo still-ran"}, "call_1")],
+        }
+        server = self.serve(
+            [completion_turn(truncated, finish_reason="length"), report_turn("PASS")]
+        )
+
+        status, _ = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PASS")
+        final = server.last_messages
+        result = [m for m in final if m["role"] == "tool"][0]
+        self.assertIn("still-ran", result["content"])
+        called = [c["id"] for m in final for c in m.get("tool_calls") or []]
+        replied = [m["tool_call_id"] for m in final if m["role"] == "tool"]
+        self.assertEqual(called, replied)
+
+    def test_a_blocked_response_ends_the_run_with_a_report(self):
+        server = self.serve([completion_turn({"content": ""}, finish_reason="sensitive")])
+
+        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertIn("finish_reason: sensitive", body)
+
+    def test_reported_token_usage_drives_compaction(self):
+        # Under the ceiling: nothing is touched, however long the transcript is.
+        loud = {
+            "content": "x" * 4000,
+            "tool_calls": [tool_call("bash", {"command": "echo hi"}, "call_1")],
+        }
+        server = self.serve(
+            [
+                completion_turn(loud, usage={"prompt_tokens": 10}),
+                report_turn("PASS"),
+            ]
+        )
+        agent.run(self.config(server, context_tokens=100000), PULL_REQUEST, "")
+        self.assertNotIn("elided", "".join(m.get("content") or "" for m in server.last_messages))
+
+    def test_compaction_starts_once_usage_passes_the_headroom(self):
+        loud = {
+            "content": "x" * 4000,
+            "tool_calls": [tool_call("bash", {"command": "echo hi"}, "call_1")],
+        }
+        server = self.serve(
+            [completion_turn(loud, usage={"prompt_tokens": 9000}) for _ in range(6)]
+            + [report_turn("PASS")]
+        )
+
+        agent.run(self.config(server, max_turns=20, context_tokens=10000), PULL_REQUEST, "")
+
+        self.assertIn("elided", "".join(m.get("content") or "" for m in server.last_messages))
+
+
+class ContextTest(AgentTestCase):
     def test_the_transcript_is_compacted_before_it_overflows(self):
         loud = "echo %s" % ("x" * 500)
         server = self.serve(
@@ -176,7 +355,7 @@ class ContextTest(AgentTest):
         )
 
         agent.run(
-            self.config(server, max_turns=20, max_context_chars=6000), PULL_REQUEST, "y" * 2000
+            self.config(server, max_turns=20, context_tokens=2000), PULL_REQUEST, "y" * 2000
         )
 
         final = server.last_messages
@@ -187,7 +366,7 @@ class ContextTest(AgentTest):
         self.assertEqual(called, replied)
 
 
-class ArtifactsTest(AgentTest):
+class ArtifactsTest(AgentTestCase):
     def test_saved_files_are_listed_in_the_report(self):
         artifacts = tempfile.mkdtemp()
         with open(os.path.join(artifacts, "dashboard.png"), "w") as handle:

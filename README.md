@@ -40,7 +40,8 @@ are never accepted as substitutes for running the thing.
 
 ## Quick start
 
-1. Add your provider key as `LLM_API_KEY` under **Settings → Secrets and variables → Actions**.
+1. Add your provider key as `LLM_API_KEY` and your model id as `LLM_MODEL` under
+   **Settings → Secrets and variables → Actions**.
 2. Copy this workflow into `.github/workflows/qa-changes.yml`:
 
 ```yaml
@@ -66,6 +67,7 @@ jobs:
       - uses: khawjaahmad/github-workflows@main
         with:
           api_key: ${{ secrets.LLM_API_KEY }}
+          model: ${{ secrets.LLM_MODEL }}
           provider: zai
 ```
 
@@ -74,62 +76,91 @@ merge.
 
 ## Providers
 
-The agent speaks the OpenAI-compatible `/v1` chat-completions wire format, so any endpoint
-that implements it works. `provider` picks the defaults:
+The agent speaks the OpenAI-compatible `/chat/completions` wire format, so any endpoint that
+implements it works. `provider` selects the base URL:
 
-| `provider` | Base URL                                                 | Default `model`    |
-| ---------- | -------------------------------------------------------- | ------------------ |
-| `zai`      | `https://api.z.ai/api/coding/paas/v4`                    | `glm-5.3`          |
-| `openai`   | `https://api.openai.com/v1`                              | `gpt-5`            |
-| `gemini`   | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-pro`   |
-| `custom`   | set `base_url` yourself                                   | set `model` yourself |
+| `provider` | Base URL                                                  | Source |
+| ---------- | --------------------------------------------------------- | ------ |
+| `zai`      | `https://api.z.ai/api/coding/paas/v4`                     | [Coding plan quick start](https://docs.z.ai/devpack/quick-start) |
+| `openai`   | `https://api.openai.com/v1`                               | [Chat API](https://platform.openai.com/docs/api-reference/chat) |
+| `gemini`   | `https://generativelanguage.googleapis.com/v1beta/openai` | [OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) |
+| `custom`   | set `base_url` yourself                                    | — |
 
-`model` and `base_url` override the defaults for any provider, so a newer model id needs no
-change here:
-
-```yaml
-      - uses: khawjaahmad/github-workflows@main
-        with:
-          api_key: ${{ secrets.LLM_API_KEY }}
-          provider: gemini
-          model: gemini-2.5-flash
-```
+**There is no default model.** Model ids change faster than this action does, and a default
+baked in here would quietly pin every repository to a superseded one. Supply it the same way
+you supply the key, so the two move together:
 
 ```yaml
       - uses: khawjaahmad/github-workflows@main
         with:
           api_key: ${{ secrets.LLM_API_KEY }}
-          provider: custom
-          base_url: https://gateway.internal/v1
-          model: my-deployment
+          model: ${{ secrets.LLM_MODEL || vars.LLM_MODEL }}
+          provider: zai
 ```
 
 The provider must support OpenAI-style function calling — the agent drives everything through
-two tools, `bash` and `submit_report`.
+two tools, `bash` and `submit_report`. On z.ai, `tool_choice` supports `auto` only, which is
+what the agent sends.
 
 ### Reasoning effort
 
-`effort` is sent as the OpenAI-standard `reasoning_effort` field, passed through verbatim.
-Leave it unset to keep the model's own default. The levels are **provider-specific**:
+`effort` is sent as `reasoning_effort`, passed through verbatim and **not validated locally**.
+The accepted levels differ by provider and change with each model release, so the authority is
+your provider's documentation, not this table:
 
-| Provider          | Accepted levels                    | Default |
-| ----------------- | ---------------------------------- | ------- |
-| z.ai `glm-5.3`    | `low`, `high`, `max`               | `max`   |
-| OpenAI            | `low`, `medium`, `high`, `xhigh`   | model-dependent |
-| Gemini            | `low`, `medium`, `high`            | model-dependent |
+- z.ai GLM-5.3: `low`, `high`, `max`, default `max`; reasoning cannot be disabled
+  ([GLM-5.3](https://docs.z.ai/guides/llm/glm-5.3)).
+- Gemini: `minimal`, `low`, `medium`, `high`, plus `none` on 2.5 models to disable thinking
+  ([OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)).
+- OpenAI: see the [reasoning guide](https://platform.openai.com/docs/guides/reasoning). Note
+  that OpenAI recommends the Responses API over Chat Completions for reasoning models; this
+  action uses Chat Completions because that is the protocol z.ai's coding plan exposes.
 
-Values are not validated locally, so a level a provider does not recognise is the provider's
-to reject — or to ignore. `glm-5.3` in particular **silently falls back to `max`** for any
-unrecognised value rather than erroring, so `xhigh` there is a no-op, not a failure. GLM-5.3
-also always reasons; thinking cannot be disabled.
+Leave `effort` unset to keep the model's own default.
+
+### Reasoning content is preserved
+
+Reasoning models return `reasoning_content` alongside the answer, and the agent sends it back
+untouched on the next turn. z.ai's Preserved Thinking is enabled by default on the coding-plan
+endpoint and requires the reasoning blocks to be returned "full, unmodified, and correctly
+ordered" — missing or rewritten blocks "may degrade performance or prevent the feature from
+taking effect", and cost the cache hits that make a long agent run affordable
+([Thinking Mode](https://docs.z.ai/guides/capabilities/thinking-mode)). Providers that do not
+return the field are unaffected.
+
+This is why compaction drops reasoning blocks whole and only as a last resort, after tool
+output and older prose have already gone.
+
+### Context, and what happens when it runs out
+
+`context_tokens` is the model's window. Set it and the agent compacts before it gets close,
+measured against the `usage.prompt_tokens` the provider reports rather than a character
+estimate. Left at `0` the agent does not guess a limit for a model it knows nothing about — it
+compacts when the provider tells it the window was exceeded.
+
+That signal is worth knowing about: on z.ai a context overflow comes back as a **successful**
+response carrying `finish_reason: model_context_window_exceeded`, not as an HTTP error
+([Chat Completion](https://docs.z.ai/api-reference/llm/chat-completion)). The agent also acts
+on `length` (the reply was truncated — it tells the model to keep replies short rather than
+reading the silence as a finished turn) and on `sensitive` / `content_filter` (it stops and
+reports).
+
+### Retries
+
+Transient failures are retried with jittered backoff, honouring `Retry-After`. Quota and
+subscription failures are not — z.ai returns HTTP 429 for an exhausted plan, an expired
+subscription and a model outside your plan as well as for genuine rate limiting, and only
+codes 1302 and 1305 are worth waiting on
+([Errors](https://docs.z.ai/api-reference/api-code)). Retrying the rest would spend the job's
+time budget and end with a vaguer message than the provider already gave you.
 
 ## Inputs
 
 | Input                     | Default              | Description                                                          |
 | ------------------------- | -------------------- | -------------------------------------------------------------------- |
 | `api_key`                 | _(required)_         | Provider API key.                                                     |
-| `provider`                | `zai`                | `zai`, `openai`, `gemini` or `custom`.                                |
-| `model`                   | per provider         | Model id.                                                             |
+| `model`                   | _(required)_         | Model id. No default — supply it from a secret or variable.           |
+| `provider`                | `zai`                | `zai`, `openai`, `gemini` or `custom`. Selects the base URL.          |
 | `base_url`                | per provider         | OpenAI-compatible base URL; required for `custom`.                    |
 | `effort`                  | _(model default)_    | `reasoning_effort`, passed through verbatim.                          |
 | `github_token`            | `github.token`       | Reads the PR and posts the report; needs `pull-requests: write`.       |
@@ -140,7 +171,7 @@ also always reasons; thinking cannot be disabled.
 | `time_budget`             | `1500`               | Wall-clock seconds before the agent is told to wrap up. `0` disables. |
 | `command_timeout`         | `300`                | Default per-command timeout, in seconds.                              |
 | `request_timeout`         | `600`                | Timeout for each request to the model endpoint.                       |
-| `max_context_chars`       | `240000`             | Conversation size before the oldest command output is elided.         |
+| `context_tokens`          | `0`                  | The model's context window. `0` means compact only on overflow.       |
 | `post_comment`            | `true`               | Set to `false` to log the report without commenting.                  |
 | `fail_on`                 | `FAIL`               | Verdicts that fail the check: a list, or `none`.                      |
 | `upload_artifacts`        | `true`               | Upload what the agent saved as a workflow artifact.                   |
@@ -167,7 +198,7 @@ Keep `time_budget` comfortably under the job's `timeout-minutes`: a job the runn
 no chance to report anything. The default pair is 25 minutes of agent against a 30-minute job.
 
 The transcript is compacted as it grows, oldest command output first, so a long run cannot
-overflow the model's context window. Lower `max_context_chars` for a smaller model.
+overflow the model's context window. Set `context_tokens` to compact before the window is reached rather than after.
 
 ## Screenshots, logs and other evidence
 
