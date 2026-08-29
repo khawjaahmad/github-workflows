@@ -1,5 +1,7 @@
 """The agent loop, against a stubbed OpenAI-compatible server."""
 
+import contextlib
+import io
 import os
 import signal
 import sys
@@ -167,21 +169,46 @@ class EndpointFailureTest(AgentTestCase):
         # A proxy answering 200 with an HTML error page. json.JSONDecodeError is
         # a ValueError, so it matched no handler and left as a traceback: exit 1,
         # no comment, empty summary.
-        server = self.serve(["<html><body>502 Bad Gateway</body></html>"] * 5)
+        page = "<html><body>502 Bad Gateway at internal.proxy.corp</body></html>"
+        server = self.serve([page] * 5)
 
-        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+        logged = io.StringIO()
+        with contextlib.redirect_stdout(logged):
+            status, body = agent.run(self.config(server), PULL_REQUEST, "")
 
         self.assertEqual(status, "PARTIAL")
         self.assertIn("not JSON", body)
-        self.assertIn("502 Bad Gateway", body)
+        # The report is a public pull request comment, so the body itself stays
+        # out of it — a proxy page can name internal hosts — and goes to the log.
+        self.assertNotIn("internal.proxy.corp", body)
+        self.assertIn("internal.proxy.corp", logged.getvalue())
 
     def test_an_empty_body_is_reported_rather_than_raised(self):
         server = self.serve([""] * 5)
 
-        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+        logged = io.StringIO()
+        with contextlib.redirect_stdout(logged):
+            status, body = agent.run(self.config(server), PULL_REQUEST, "")
 
         self.assertEqual(status, "PARTIAL")
-        self.assertIn("(empty body)", body)
+        self.assertIn("not JSON", body)
+        self.assertIn("(empty body)", logged.getvalue())
+
+    def test_an_error_body_is_summarised_in_the_report_and_logged_in_full(self):
+        server = self.serve(
+            [(429, {"error": {"code": "1310", "message": "Weekly Limit Exhausted",
+                              "request_id": "req-internal-9f3c"}})]
+        )
+
+        logged = io.StringIO()
+        with contextlib.redirect_stdout(logged):
+            _, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        # The provider writes `message` for a developer to read, so it is safe to
+        # publish. The rest of the body is diagnostics, and stays in the log.
+        self.assertIn("Weekly Limit Exhausted", body)
+        self.assertNotIn("req-internal-9f3c", body)
+        self.assertIn("req-internal-9f3c", logged.getvalue())
 
     def test_a_transient_bad_body_is_retried(self):
         server = self.serve(["<html>502</html>", report_turn("PASS")])
@@ -373,6 +400,52 @@ class ProviderBehaviourTest(AgentTestCase):
         agent.run(self.config(server, max_turns=20, context_tokens=10000), PULL_REQUEST, "")
 
         self.assertIn("elided", "".join(m.get("content") or "" for m in server.last_messages))
+
+
+class UnexpectedFailureTest(AgentTestCase):
+    """Anything the loop does not anticipate must still leave a report."""
+
+    def test_an_unexpected_exception_still_produces_a_report(self):
+        server = self.serve([bash_turn("echo got-this-far"), report_turn("PASS")])
+
+        logged = io.StringIO()
+        with mock.patch.object(agent.tools, "run_bash", side_effect=OSError("no bash")):
+            with contextlib.redirect_stdout(logged):
+                status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertIn("unexpected failure", body)
+        self.assertIn("OSError", body)
+        # Loud where an engineer will look, graceful where the author will.
+        self.assertIn("Traceback", logged.getvalue())
+
+    def test_the_net_does_not_swallow_a_termination_signal(self):
+        server = self.serve([bash_turn("kill -TERM %d" % os.getpid()), report_turn("PASS")])
+
+        _, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        # Interrupted is an Exception too: the specific handler has to win.
+        self.assertIn("stopped by SIGTERM", body)
+        self.assertNotIn("unexpected failure", body)
+
+
+class CalibrationTest(unittest.TestCase):
+    def test_the_ratio_is_measured_not_assumed(self):
+        self.assertEqual(agent._calibrate(40000, 10000), 4.0)
+
+    def test_a_nonsense_reading_cannot_make_the_budget_absurd(self):
+        self.assertEqual(agent._calibrate(1000000, 10), 8.0)
+        self.assertEqual(agent._calibrate(10, 1000), 1.5)
+        self.assertEqual(agent._calibrate(0, 0), agent.CHARS_PER_TOKEN)
+
+    def test_the_budget_uses_the_measured_ratio(self):
+        config = make_config(context_tokens=10000)
+        # 0.8 * 10000 tokens, at a measured 4 chars per token.
+        self.assertEqual(agent._budget(config, 9000, 4.0), 32000)
+        # Comfortably under the ceiling: nothing to do.
+        self.assertEqual(agent._budget(config, 100, 4.0), 0)
+        # No window stated: the agent does not guess one.
+        self.assertEqual(agent._budget(make_config(context_tokens=0), 99999, 4.0), 0)
 
 
 class ContextTest(AgentTestCase):

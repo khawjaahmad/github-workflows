@@ -3,6 +3,7 @@
 import signal
 import sys
 import time
+import traceback
 
 from . import history, llm, prompt, tools
 
@@ -46,6 +47,16 @@ def run(config, pull_request, diff):
     except Interrupted as error:
         log(str(error))
         return _fallback(config, str(error), trail)
+    except Exception as error:
+        # The net. Fixing each escape as it is discovered leaves the next one
+        # undiscovered, and every one of them costs the reviewer their report.
+        # The traceback goes to the job log, where it is loud; the report says
+        # what happened without pretending the run succeeded.
+        log(traceback.format_exc())
+        return _fallback(
+            config, "an unexpected failure ended the run: %s: %s" % (type(error).__name__, error),
+            trail,
+        )
     finally:
         restore()
 
@@ -102,6 +113,7 @@ def _loop(config, pull_request, diff, trail):
     grace = GRACE_TURNS
     turn = 0
     prompt_tokens = 0
+    chars_per_token = CHARS_PER_TOKEN
     overflows = 0
 
     while True:
@@ -117,15 +129,21 @@ def _loop(config, pull_request, diff, trail):
         if winding_down:
             grace -= 1
 
-        messages = history.compact(messages, _budget(config, prompt_tokens))
+        messages = history.compact(messages, _budget(config, prompt_tokens, chars_per_token))
+        sent_chars = history.size(messages)
         try:
-            completion = llm.complete(config, messages, tool_definitions)
+            completion = llm.complete(config, messages, tool_definitions, deadline=deadline)
         except llm.LLMError as error:
             # The endpoint is gone or the request is unacceptable. Retrying is
-            # llm.complete's job and it already did; report what we have.
+            # llm.complete's job and it already did; report what we have. The
+            # raw body stays in the log — the report is a public comment.
             log("model endpoint failed: %s" % error)
+            if error.detail:
+                log(error.detail)
             return _fallback(config, "the model endpoint failed: %s" % error, trail)
 
+        if completion.prompt_tokens:
+            chars_per_token = _calibrate(sent_chars, completion.prompt_tokens)
         prompt_tokens = completion.prompt_tokens or prompt_tokens
         message = completion.message
 
@@ -206,7 +224,19 @@ def _nudge(completion):
     return TRUNCATED_NUDGE if completion.truncated else CONTINUE_NUDGE
 
 
-def _budget(config, prompt_tokens):
+def _calibrate(sent_chars, prompt_tokens):
+    """Chars per token, measured from a request the provider has counted for us.
+
+    Better than a constant: the ratio depends on the language, the code, and the
+    tokenizer, and guessing low means compacting earlier than necessary. Clamped
+    so one odd reading cannot make the budget absurd.
+    """
+    if sent_chars <= 0 or prompt_tokens <= 0:
+        return CHARS_PER_TOKEN
+    return min(8.0, max(1.5, sent_chars / float(prompt_tokens)))
+
+
+def _budget(config, prompt_tokens, chars_per_token=CHARS_PER_TOKEN):
     """The character budget for compaction, or 0 while there is no reason to.
 
     The provider reports how many prompt tokens the last request actually used,
@@ -220,7 +250,7 @@ def _budget(config, prompt_tokens):
     ceiling = int(config.context_tokens * config.context_headroom)
     if prompt_tokens and prompt_tokens < ceiling:
         return 0
-    return ceiling * CHARS_PER_TOKEN
+    return int(ceiling * chars_per_token)
 
 
 def _shrink(messages):

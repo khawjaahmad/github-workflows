@@ -45,13 +45,25 @@ TRANSIENT_CODES = {
 OVERFLOW_REASONS = {"model_context_window_exceeded"}
 TRUNCATED_REASONS = {"length"}
 BLOCKED_REASONS = {"sensitive", "content_filter"}
-RETRYABLE_REASONS = {"network_error"}
 
 MAX_BACKOFF = 60
+# Floor for a request made after the run's time budget is spent: the wind-down
+# turns still have to reach the model to get a report out of it.
+WIND_DOWN_TIMEOUT = 60
 
 
 class LLMError(Exception):
-    """A request the client could not complete. Always reported, never silent."""
+    """A request the client could not complete. Always reported, never silent.
+
+    The message is written to be published: it ends up in the QA report, which
+    is a public pull request comment. `detail` is the raw response body, which
+    is for the job log only — a proxy's error page can carry internal hostnames
+    and paths, and an auth failure can echo request identifiers.
+    """
+
+    def __init__(self, summary, detail=""):
+        super().__init__(summary)
+        self.detail = detail
 
 
 class _MalformedBody(Exception):
@@ -60,6 +72,10 @@ class _MalformedBody(Exception):
     Internal: retried like any other transient failure, and surfaced as an
     LLMError once the attempts are spent, so it can never escape as a traceback.
     """
+
+    def __init__(self, body):
+        super().__init__("non-JSON body")
+        self.body = body
 
 
 @dataclass
@@ -101,16 +117,19 @@ def _post(url, payload, api_key, timeout):
     except ValueError:
         # An HTML error page returned with a 200, a truncated body, an empty
         # response. json.JSONDecodeError is a ValueError, so it matches neither
-        # of the urllib handlers below and would leave as a traceback.
-        raise _MalformedBody(
-            "%s returned a 200 that is not JSON: %s" % (url, (raw.strip() or "(empty body)")[:300])
-        )
+        # of the urllib handlers in complete() and would leave as a traceback.
+        raise _MalformedBody(raw)
 
 
-def complete(config, messages, tools, timeout=None, attempts=5):
-    """Send one chat-completion request and return a Completion."""
+def complete(config, messages, tools, timeout=None, attempts=5, deadline=None):
+    """Send one chat-completion request and return a Completion.
+
+    `deadline` is the run's time budget as a monotonic timestamp. Requests are
+    clamped to what is left of it and retries stop once it passes, so a hanging
+    or flapping endpoint cannot outlive the budget the report has to be written
+    inside of.
+    """
     url = "%s/chat/completions" % config.base_url
-    timeout = timeout or config.request_timeout
     payload = {
         "model": config.model,
         "messages": messages,
@@ -128,31 +147,47 @@ def complete(config, messages, tools, timeout=None, attempts=5):
     body = None
     last_error = None
     for attempt in range(attempts):
+        request_timeout = timeout or _attempt_timeout(config, deadline)
         try:
-            body = _post(url, payload, config.api_key, timeout)
+            body = _post(url, payload, config.api_key, request_timeout)
             break
         # HTTPError is a subclass of URLError, so it has to be caught first.
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", "replace")[:2000]
-            last_error = LLMError(_describe(error.code, url, detail))
+            last_error = _http_error(config, url, error.code, detail)
             if not _worth_retrying(error.code, detail):
                 raise last_error
             delay = _backoff(attempt, error.headers.get("Retry-After"))
         except (urllib.error.URLError, TimeoutError) as error:
-            last_error = LLMError("request to %s failed: %s" % (url, error))
+            last_error = LLMError(
+                "the model endpoint (provider: %s) could not be reached: %s"
+                % (config.provider, type(error).__name__),
+                detail="%s: %s" % (url, error),
+            )
             delay = _backoff(attempt, None)
         except _MalformedBody as error:
-            last_error = LLMError(str(error))
+            last_error = LLMError(
+                "the model endpoint (provider: %s) returned a success status with a "
+                "body that is not JSON (%d bytes) — see the job log for it"
+                % (config.provider, len(error.body)),
+                detail="%s returned a non-JSON body:\n%s"
+                % (url, (error.body.strip() or "(empty body)")[:2000]),
+            )
             delay = _backoff(attempt, None)
-        if attempt < attempts - 1:
-            time.sleep(delay)
+
+        if attempt >= attempts - 1 or _spent(deadline):
+            break
+        time.sleep(delay)
 
     if body is None:
         raise last_error
 
     choices = body.get("choices") or []
     if not choices:
-        raise LLMError("no choices in response: %s" % json.dumps(body)[:2000])
+        raise LLMError(
+            "the model endpoint (provider: %s) returned no choices" % config.provider,
+            detail=json.dumps(body)[:2000],
+        )
 
     choice = choices[0]
     usage = body.get("usage") or {}
@@ -160,9 +195,46 @@ def complete(config, messages, tools, timeout=None, attempts=5):
     return Completion(
         message=normalize(choice.get("message") or {}),
         finish_reason=choice.get("finish_reason") or "",
-        prompt_tokens=int(usage.get("prompt_tokens") or 0),
-        cached_tokens=int(details.get("cached_tokens") or 0),
+        prompt_tokens=_count(usage.get("prompt_tokens")),
+        cached_tokens=_count(details.get("cached_tokens")),
     )
+
+
+def _count(value):
+    """Token counts are advisory: a provider sending nonsense must not crash us."""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _spent(deadline):
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def _attempt_timeout(config, deadline):
+    """How long one request may take, given what is left of the time budget."""
+    if deadline is None:
+        return config.request_timeout
+    remaining = int(deadline - time.monotonic())
+    if remaining <= 0:
+        # Past the budget, so this is a wind-down turn asking for the report.
+        return WIND_DOWN_TIMEOUT
+    return max(WIND_DOWN_TIMEOUT, min(config.request_timeout, remaining))
+
+
+def _provider_message(detail):
+    """The human-readable message from a structured error body, if there is one.
+
+    Providers write these for developers to read, so this is the part of a
+    failure that is safe to put in a public comment. The rest of the body is not.
+    """
+    try:
+        error = json.loads(detail).get("error") or {}
+    except (ValueError, AttributeError):
+        return ""
+    message = error.get("message")
+    return message.strip() if isinstance(message, str) else ""
 
 
 def _business_code(detail):
@@ -187,25 +259,38 @@ def _backoff(attempt, retry_after):
     """Seconds to wait — the server's own advice when it gave any."""
     if retry_after:
         try:
-            return min(float(retry_after), MAX_BACKOFF)
+            return min(max(0.0, float(retry_after)), MAX_BACKOFF)
         except ValueError:
             pass
     # Jittered, so parallel QA jobs on the same key do not retry in lockstep.
     return min(2 ** attempt + random.uniform(0, 1), MAX_BACKOFF)
 
 
-def _describe(code, url, detail):
-    message = "HTTP %s from %s: %s" % (code, url, detail)
+def _http_error(config, url, status, detail):
+    """Split a failed response into a publishable summary and a private detail."""
+    summary = "the model endpoint (provider: %s) returned HTTP %s" % (config.provider, status)
+    message = _provider_message(detail)
+    if message:
+        summary += ": %s" % message[:400]
+    summary += _advice(status, detail)
+    return LLMError(summary, detail="%s -> HTTP %s\n%s" % (url, status, detail))
+
+
+def _advice(status, detail):
     business = _business_code(detail)
-    if business == "1261" or (code == 400 and "too long" in detail.lower()):
-        message += "\nThe prompt is too long for this model — lower `max_turns`, or set "
-        message += "`context_tokens` so the agent compacts before it gets here."
-    elif code in (401, 403):
-        message += "\nCheck the `api_key` input and that the key is valid for this provider."
-    elif code == 429 and business and business not in TRANSIENT_CODES:
-        message += "\nThis is a quota or subscription limit rather than a rate limit, so it "
-        message += "was not retried. The provider's message above says when it resets."
-    return message
+    if business == "1261" or (status == 400 and "too long" in detail.lower()):
+        return (
+            "\nThe prompt is too long for this model — lower `max_turns`, or set "
+            "`context_tokens` so the agent compacts before it gets here."
+        )
+    if status in (401, 403):
+        return "\nCheck the `api_key` input and that the key is valid for this provider."
+    if status == 429 and business and business not in TRANSIENT_CODES:
+        return (
+            "\nThis is a quota or subscription limit rather than a rate limit, so it "
+            "was not retried. The provider's message above says when it resets."
+        )
+    return ""
 
 
 def normalize(message):

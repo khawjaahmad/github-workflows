@@ -191,14 +191,36 @@ run can end produces a report:
   listing the commands it had actually run.
 - The provider fails, times out, or rejects the request. Retries are exhausted first
   (honouring `Retry-After`), then the same `PARTIAL` fallback is posted with the error.
-- The comment cannot be posted — a missing `pull-requests: write`, say. The run is annotated
-  with an error and the report is still written to the job summary and the log.
+- The job is killed. `SIGTERM` and `SIGINT` are trapped — a run over its `timeout-minutes`
+  is signalled before it is killed — and produce the same fallback.
+- Anything else. Any unexpected exception in the loop is caught, its traceback written to the
+  job log, and the fallback posted. Closing each escape as it is found leaves the next one
+  undiscovered, and every one of them costs the author their report.
+
+Retries answer to the budget too. Five attempts at the default `request_timeout` is fifty
+minutes against a thirty-minute job, so each request is clamped to what is left of
+`time_budget` and retries stop once it is spent — with a floor, so the wind-down turns can
+still reach the model to ask for the report.
+
+Failures are split between what is published and what is only logged. The report is a public
+pull request comment, so it carries the status and the provider's own `message` field, which
+providers write for developers to read. The raw response body goes to the job log instead: a
+proxy's error page can name internal hosts and paths, and an auth failure can echo request
+identifiers.
 
 Keep `time_budget` comfortably under the job's `timeout-minutes`: a job the runner kills has
 no chance to report anything. The default pair is 25 minutes of agent against a 30-minute job.
 
 The transcript is compacted as it grows, oldest command output first, so a long run cannot
-overflow the model's context window. Set `context_tokens` to compact before the window is reached rather than after.
+overflow the model's context window. Set `context_tokens` to compact before the window is
+reached rather than after.
+
+Compaction gives things up in order: old command output, then older prose, then reasoning
+blocks — dropped whole, never rewritten, because z.ai wants them back unmodified or not at
+all. If one command still produced more output than the entire budget, that result is
+truncated with its head kept, rather than left whole to fail a request it can never fit. The
+budget itself is measured, not assumed: the characters-per-token ratio is calibrated from the
+`usage.prompt_tokens` the provider reports for a request whose size is known.
 
 ## Screenshots, logs and other evidence
 

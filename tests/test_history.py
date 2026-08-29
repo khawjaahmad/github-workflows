@@ -83,16 +83,40 @@ class CompactTest(unittest.TestCase):
         for original, kept in zip(messages[-6:], compacted[-6:]):
             self.assertEqual(original["content"], kept["content"])
 
-    def test_the_last_exchange_survives_even_a_tiny_budget(self):
+    def test_an_oversized_result_in_the_last_exchange_is_truncated(self):
+        # One command produced more output than the whole budget. The last
+        # exchange is protected from eliding, so without truncation nothing gives
+        # and the next request fails on a window it can never fit.
+        messages = conversation(1, output_chars=30000)
+
+        compacted = history.compact(messages, 5000)
+
+        self.assertLessEqual(history.size(compacted), 5000)
+        self.assertEqual(len(compacted), len(messages))
+        result = compacted[-1]["content"]
+        self.assertIn("truncated to fit the context window", result)
+        # The head survives, so the model can still read how the command started.
+        self.assertTrue(messages[-1]["content"].startswith(result.split("\n[...")[0]))
+        self.assertGreaterEqual(len(result.split("\n[...")[0]), history.MIN_TOOL_CHARS)
+
+    def test_a_tiny_budget_leaves_a_small_bounded_residue(self):
         messages = conversation(20)
         before = history.size(messages)
 
         compacted = history.compact(messages, 100)
 
-        self.assertEqual(compacted[-1]["content"], messages[-1]["content"])
-        self.assertEqual(compacted[-2]["content"], messages[-2]["content"])
-        # Everything else has given way; what is left is a small, bounded residue.
+        self.assertEqual(len(compacted), len(messages))
         self.assertLess(history.size(compacted), before // 4)
+
+    def test_truncation_never_edits_a_reasoning_block(self):
+        messages = conversation(1, output_chars=30000)
+        messages[2]["reasoning_content"] = "r" * 8000
+
+        compacted = history.compact(messages, 5000)
+
+        # Reasoning is dropped whole or kept verbatim — never rewritten.
+        kept = compacted[2].get("reasoning_content")
+        self.assertTrue(kept is None or kept == messages[2]["reasoning_content"])
 
     def test_the_oldest_output_goes_first(self):
         messages = conversation(20)

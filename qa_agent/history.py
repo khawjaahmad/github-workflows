@@ -15,6 +15,11 @@ must keep its matching `tool` reply, or the next request is rejected.
 """
 
 ELIDED = "[earlier output elided to fit the context window; was %d characters]"
+TRUNCATED = "\n[... %d characters truncated to fit the context window]"
+
+# What is left of a tool result after a hard truncation, so the model can still
+# see how the command started and what it was.
+MIN_TOOL_CHARS = 400
 
 # Recent turns are what the model is actually reasoning about, so they are left
 # alone until there is nothing older left to shrink.
@@ -63,8 +68,19 @@ def compact(messages, max_chars, keep_recent=KEEP_RECENT):
             if step(compacted[index]) and size(compacted) <= max_chars:
                 return compacted
 
-    # Best effort. What is left — the system prompt, the pull request context and
-    # the last exchange — is the part worth keeping if anything is.
+    # The protected exchange is itself too big — one command produced more output
+    # than the whole budget. Eliding cannot reach it, so nothing above gives
+    # anything up and the next request fails on a window it can never fit.
+    # Truncate the output instead: a clipped result the model can still read
+    # beats a request that cannot be sent. Tool output is ours to cut; reasoning
+    # blocks are never edited, only dropped whole.
+    for index in range(len(compacted)):
+        if _truncate_tool(compacted[index], size(compacted) - max_chars):
+            if size(compacted) <= max_chars:
+                return compacted
+
+    # Best effort. What is left — the system prompt and the pull request context
+    # — is the part worth keeping if anything is.
     return compacted
 
 
@@ -84,6 +100,19 @@ def _elide(message, role):
     if not content or content.startswith("[earlier output elided"):
         return False
     message["content"] = ELIDED % len(content)
+    return True
+
+
+def _truncate_tool(message, over):
+    """Cut `over` characters off the end of a tool result, keeping the start."""
+    if message.get("role") != "tool" or over <= 0:
+        return False
+    content = message.get("content") or ""
+    # The marker itself costs characters, so cut for it too.
+    keep = max(MIN_TOOL_CHARS, len(content) - over - len(TRUNCATED % over))
+    if keep >= len(content):
+        return False
+    message["content"] = content[:keep] + TRUNCATED % (len(content) - keep)
     return True
 
 
