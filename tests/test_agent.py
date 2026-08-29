@@ -163,6 +163,34 @@ class EndpointFailureTest(AgentTestCase):
         self.assertIn("model endpoint failed", body)
         self.assertIn("echo setup-worked", body)
 
+    def test_a_non_json_body_is_reported_rather_than_raised(self):
+        # A proxy answering 200 with an HTML error page. json.JSONDecodeError is
+        # a ValueError, so it matched no handler and left as a traceback: exit 1,
+        # no comment, empty summary.
+        server = self.serve(["<html><body>502 Bad Gateway</body></html>"] * 5)
+
+        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertIn("not JSON", body)
+        self.assertIn("502 Bad Gateway", body)
+
+    def test_an_empty_body_is_reported_rather_than_raised(self):
+        server = self.serve([""] * 5)
+
+        status, body = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PARTIAL")
+        self.assertIn("(empty body)", body)
+
+    def test_a_transient_bad_body_is_retried(self):
+        server = self.serve(["<html>502</html>", report_turn("PASS")])
+
+        status, _ = agent.run(self.config(server), PULL_REQUEST, "")
+
+        self.assertEqual(status, "PASS")
+        self.assertEqual(len(server.requests), 2)
+
     def test_a_rejected_request_is_not_retried_but_is_reported(self):
         # 1261 is z.ai's "Prompt too long". https://docs.z.ai/api-reference/api-code
         server = self.serve([(400, {"error": {"code": "1261", "message": "Prompt too long"}})])

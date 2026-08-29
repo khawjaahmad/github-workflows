@@ -54,6 +54,14 @@ class LLMError(Exception):
     """A request the client could not complete. Always reported, never silent."""
 
 
+class _MalformedBody(Exception):
+    """A 200 that is not JSON — usually a proxy or gateway answering for the API.
+
+    Internal: retried like any other transient failure, and surfaced as an
+    LLMError once the attempts are spent, so it can never escape as a traceback.
+    """
+
+
 @dataclass
 class Completion:
     """One assistant turn, with the metadata the agent loop needs to react."""
@@ -87,7 +95,16 @@ def _post(url, payload, api_key, timeout):
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+        raw = response.read().decode("utf-8", "replace")
+    try:
+        return json.loads(raw)
+    except ValueError:
+        # An HTML error page returned with a 200, a truncated body, an empty
+        # response. json.JSONDecodeError is a ValueError, so it matches neither
+        # of the urllib handlers below and would leave as a traceback.
+        raise _MalformedBody(
+            "%s returned a 200 that is not JSON: %s" % (url, (raw.strip() or "(empty body)")[:300])
+        )
 
 
 def complete(config, messages, tools, timeout=None, attempts=5):
@@ -123,6 +140,9 @@ def complete(config, messages, tools, timeout=None, attempts=5):
             delay = _backoff(attempt, error.headers.get("Retry-After"))
         except (urllib.error.URLError, TimeoutError) as error:
             last_error = LLMError("request to %s failed: %s" % (url, error))
+            delay = _backoff(attempt, None)
+        except _MalformedBody as error:
+            last_error = LLMError(str(error))
             delay = _backoff(attempt, None)
         if attempt < attempts - 1:
             time.sleep(delay)

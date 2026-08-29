@@ -108,6 +108,10 @@ class LLMServer(_Server):
         if isinstance(turn, int):
             self.reply(handler, turn, {"error": {"message": "stub failure"}})
             return
+        if isinstance(turn, str):
+            # A gateway answering for the API: 200, but not JSON.
+            self.reply_raw(handler, 200, turn, content_type="text/html")
+            return
         if isinstance(turn, tuple):
             status, payload = turn
             self.reply(handler, status, payload)
