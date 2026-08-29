@@ -102,14 +102,6 @@ triggers:
 - The payment module requires a Stripe test key — skip payment flow testing
 ```
 
-## Integration with the Verification Stack
-
-The QA agent is most powerful when used alongside the code review agent and the iterate skill as part of the full Verification Stack:
-
-1. **Code review** catches issues by reading the diff (style, security, data structures)
-2. **QA** catches issues by running the software (behavioral regressions, UI bugs)
-3. **Iterate** orchestrates the loop — fixing issues flagged by either verifier and re-polling until the PR is clean
-
 ## Troubleshooting
 
 **QA agent can't start the server**
