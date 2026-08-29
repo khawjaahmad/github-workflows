@@ -1,0 +1,89 @@
+name: QA Changes
+description: >-
+  Validate a pull request by actually running the software — sets up the repo,
+  exercises the changed behaviour, and posts a QA report as a PR comment.
+author: khawjaahmad
+
+inputs:
+  api_key:
+    description: API key for the LLM provider (store it as the LLM_API_KEY secret).
+    required: true
+  provider:
+    description: >-
+      Which OpenAI-compatible endpoint to use: zai (z.ai coding plan), openai,
+      gemini, or custom. With `custom` you must also set `base_url` and `model`.
+    required: false
+    default: zai
+  model:
+    description: >-
+      Model id. Defaults per provider — zai: glm-4.6, openai: gpt-5,
+      gemini: gemini-2.5-pro.
+    required: false
+    default: ""
+  base_url:
+    description: >-
+      Override the OpenAI-compatible base URL that `/chat/completions` is
+      appended to. Required when provider is `custom`.
+    required: false
+    default: ""
+  github_token:
+    description: Token used to read the pull request and post the QA report.
+    required: false
+    default: ${{ github.token }}
+  pr_number:
+    description: Pull request number. Defaults to the PR from the triggering event.
+    required: false
+    default: ""
+  setup_command:
+    description: Optional command the agent runs before it starts testing.
+    required: false
+    default: ""
+  max_turns:
+    description: Maximum model turns before the agent gives up and reports PARTIAL.
+    required: false
+    default: "40"
+  command_timeout:
+    description: Default timeout in seconds for each command the agent runs.
+    required: false
+    default: "300"
+  post_comment:
+    description: Post the report as a PR comment. Set to false to only log it.
+    required: false
+    default: "true"
+  python_version:
+    description: Python version used to run the agent.
+    required: false
+    default: "3.11"
+
+outputs:
+  status:
+    description: The QA verdict — PASS, FAIL or PARTIAL.
+    value: ${{ steps.qa.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python for the QA agent
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Run QA agent
+      id: qa
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        QA_API_KEY: ${{ inputs.api_key }}
+        QA_PROVIDER: ${{ inputs.provider }}
+        QA_MODEL: ${{ inputs.model }}
+        QA_BASE_URL: ${{ inputs.base_url }}
+        QA_GITHUB_TOKEN: ${{ inputs.github_token }}
+        QA_REPO: ${{ github.repository }}
+        QA_PR_NUMBER: ${{ inputs.pr_number != '' && inputs.pr_number || github.event.pull_request.number }}
+        QA_WORKSPACE: ${{ github.workspace }}
+        QA_SETUP_COMMAND: ${{ inputs.setup_command }}
+        QA_MAX_TURNS: ${{ inputs.max_turns }}
+        QA_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        QA_POST_COMMENT: ${{ inputs.post_comment }}
+      run: python -m qa_agent

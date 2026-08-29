@@ -1,0 +1,38 @@
+name: QA Changes
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to QA
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: qa-changes-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr_number) }}
+          # Full history so the agent can diff against, and check out, the base branch.
+          fetch-depth: 0
+
+      - name: QA the changes
+        # In your own repository use: khawjaahmad/github-workflows@main
+        uses: ./
+        with:
+          api_key: ${{ secrets.LLM_API_KEY }}
+          provider: zai
+          pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
