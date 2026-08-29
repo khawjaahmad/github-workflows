@@ -21,13 +21,14 @@ jobs:
   qa:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
     steps:
       # QA needs a provider key. Skip rather than fail so the check does not go red
-      # on every repository that has not configured the secret yet.
+      # on every repository that has not configured the secret yet. The secret is
+      # scoped to this step alone — the agent's own commands must never see it.
       - name: Check that LLM_API_KEY is configured
         id: preflight
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
           if [ -z "$LLM_API_KEY" ]; then
             echo "LLM_API_KEY is not set — skipping QA. Add it under Settings → Secrets and variables → Actions." \

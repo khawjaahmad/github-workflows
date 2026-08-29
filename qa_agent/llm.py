@@ -6,15 +6,17 @@ self-hosted gateway.
 """
 
 import json
+import random
 import time
 import urllib.error
 import urllib.request
 
-RETRY_STATUSES = {408, 409, 429, 500, 502, 503, 504}
+RETRY_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
+MAX_BACKOFF = 60
 
 
 class LLMError(Exception):
-    pass
+    """A request the client could not complete. Always reported, never silent."""
 
 
 def _post(url, payload, api_key, timeout):
@@ -31,9 +33,10 @@ def _post(url, payload, api_key, timeout):
         return json.loads(response.read().decode("utf-8"))
 
 
-def complete(config, messages, tools, timeout=300, attempts=4):
+def complete(config, messages, tools, timeout=None, attempts=5):
     """Send one chat-completion request and return the assistant message."""
     url = "%s/chat/completions" % config.base_url
+    timeout = timeout or config.request_timeout
     payload = {
         "model": config.model,
         "messages": messages,
@@ -47,26 +50,56 @@ def complete(config, messages, tools, timeout=300, attempts=4):
     if config.effort:
         payload["reasoning_effort"] = config.effort
 
+    body = None
     last_error = None
     for attempt in range(attempts):
         try:
             body = _post(url, payload, config.api_key, timeout)
             break
+        # HTTPError is a subclass of URLError, so it has to be caught first.
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", "replace")[:2000]
-            last_error = LLMError("HTTP %s from %s: %s" % (error.code, url, detail))
+            last_error = LLMError(_describe(error.code, url, detail))
             if error.code not in RETRY_STATUSES:
                 raise last_error
+            delay = _backoff(attempt, error.headers.get("Retry-After"))
         except (urllib.error.URLError, TimeoutError) as error:
             last_error = LLMError("request to %s failed: %s" % (url, error))
-        time.sleep(2 ** attempt)
-    else:
+            delay = _backoff(attempt, None)
+        if attempt < attempts - 1:
+            time.sleep(delay)
+
+    if body is None:
         raise last_error
 
     choices = body.get("choices") or []
     if not choices:
         raise LLMError("no choices in response: %s" % json.dumps(body)[:2000])
     return normalize(choices[0].get("message") or {})
+
+
+def _backoff(attempt, retry_after):
+    """Seconds to wait — the server's own advice when it gave any."""
+    if retry_after:
+        try:
+            return min(float(retry_after), MAX_BACKOFF)
+        except ValueError:
+            pass
+    # Jittered, so parallel QA jobs on the same key do not retry in lockstep.
+    return min(2 ** attempt + random.uniform(0, 1), MAX_BACKOFF)
+
+
+def _describe(code, url, detail):
+    message = "HTTP %s from %s: %s" % (code, url, detail)
+    lowered = detail.lower()
+    if code == 400 and ("context" in lowered or "too long" in lowered or "max_tokens" in lowered):
+        message += (
+            "\nThe conversation is too long for this model — lower `max_context_chars` "
+            "or `max_turns`."
+        )
+    elif code in (401, 403):
+        message += "\nCheck the `api_key` input and that the key is valid for this provider."
+    return message
 
 
 def normalize(message):

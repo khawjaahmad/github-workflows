@@ -34,6 +34,12 @@ inputs:
     description: Pull request number. Defaults to the PR from the triggering event.
     required: false
     default: ""
+  github_api_url:
+    description: >-
+      GitHub REST API root. Defaults to the host the workflow is running on, so
+      GitHub Enterprise Server works without any extra configuration.
+    required: false
+    default: ${{ github.api_url }}
   effort:
     description: >-
       Reasoning effort, sent as `reasoning_effort` and passed through verbatim.
@@ -47,17 +53,49 @@ inputs:
     required: false
     default: ""
   max_turns:
-    description: Maximum model turns before the agent gives up and reports PARTIAL.
+    description: Model turns before the agent is told to wrap up and report.
     required: false
     default: "40"
+  time_budget:
+    description: >-
+      Wall-clock seconds before the agent is told to wrap up and report. Keep it
+      comfortably under the job's `timeout-minutes`, or the job is killed before
+      a report exists. Set to 0 to rely on `max_turns` alone.
+    required: false
+    default: "1500"
   command_timeout:
     description: Default timeout in seconds for each command the agent runs.
     required: false
     default: "300"
+  request_timeout:
+    description: Timeout in seconds for each request to the model endpoint.
+    required: false
+    default: "600"
+  max_context_chars:
+    description: >-
+      Approximate size of the conversation, in characters, before the oldest
+      command output is elided. Lower it for a model with a small context window.
+    required: false
+    default: "240000"
   post_comment:
     description: Post the report as a PR comment. Set to false to only log it.
     required: false
     default: "true"
+  fail_on:
+    description: >-
+      Which verdicts fail the check: a list such as `FAIL` or `FAIL,PARTIAL`, or
+      `none` to always stay green while you are trying the action out.
+    required: false
+    default: FAIL
+  upload_artifacts:
+    description: >-
+      Upload whatever the agent saved (screenshots, logs) as a workflow artifact.
+    required: false
+    default: "true"
+  artifact_retention_days:
+    description: How long to keep the uploaded artifacts.
+    required: false
+    default: "14"
   python_version:
     description: Python version used to run the agent.
     required: false
@@ -88,11 +126,30 @@ runs:
         QA_BASE_URL: ${{ inputs.base_url }}
         QA_GITHUB_TOKEN: ${{ inputs.github_token }}
         QA_REPO: ${{ github.repository }}
+        QA_GITHUB_API_URL: ${{ inputs.github_api_url }}
         QA_PR_NUMBER: ${{ inputs.pr_number != '' && inputs.pr_number || github.event.pull_request.number }}
         QA_WORKSPACE: ${{ github.workspace }}
         QA_EFFORT: ${{ inputs.effort }}
         QA_SETUP_COMMAND: ${{ inputs.setup_command }}
         QA_MAX_TURNS: ${{ inputs.max_turns }}
+        QA_TIME_BUDGET: ${{ inputs.time_budget }}
         QA_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        QA_REQUEST_TIMEOUT: ${{ inputs.request_timeout }}
+        QA_MAX_CONTEXT_CHARS: ${{ inputs.max_context_chars }}
         QA_POST_COMMENT: ${{ inputs.post_comment }}
+        QA_FAIL_ON: ${{ inputs.fail_on }}
+        QA_ARTIFACTS_DIR: ${{ runner.temp }}/qa-artifacts
+        QA_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: python -m qa_agent
+
+    # Screenshots and logs cannot be embedded in a PR comment, so they travel
+    # with the run instead; the report lists them by name. `always()` because the
+    # evidence matters most when the verdict was FAIL.
+    - name: Upload QA artifacts
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: qa-changes-pr-${{ inputs.pr_number != '' && inputs.pr_number || github.event.pull_request.number }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/qa-artifacts
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.artifact_retention_days }}

@@ -1,11 +1,35 @@
 """Tools the QA agent can call: run a shell command, and submit the report."""
 
 import json
+import os
+import signal
 import subprocess
 import tempfile
 
 MAX_OUTPUT_CHARS = 20000
 VALID_STATUSES = ("PASS", "FAIL", "PARTIAL")
+
+# The agent's instructions come partly from the pull request itself, so the
+# commands it runs are only as trustworthy as the branch under test. Nothing the
+# action introduces — and none of the runner's privileged tokens — is exposed to
+# them. Repository-supplied variables are left alone: a project may legitimately
+# need them to boot.
+SECRET_PREFIXES = ("QA_", "INPUT_")
+SECRET_NAMES = frozenset(
+    {
+        "LLM_API_KEY",
+        "GITHUB_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+    }
+)
+# Scrubbed with everything else, then handed back: the agent needs somewhere to
+# put screenshots and it carries no secret.
+PASS_THROUGH = ("QA_ARTIFACTS_DIR",)
+
+# Time a killed process group gets to exit before it is killed outright.
+GRACE_SECONDS = 3
 
 
 def definitions(command_timeout):
@@ -83,22 +107,45 @@ def definitions(command_timeout):
     ]
 
 
-def run_bash(command, workspace, timeout):
+def child_environment(environ=None):
+    """The environment the agent's commands run in, with our secrets removed."""
+    source = os.environ if environ is None else environ
+    safe = {
+        name: value
+        for name, value in source.items()
+        if name not in SECRET_NAMES and not name.startswith(SECRET_PREFIXES)
+    }
+    for name in PASS_THROUGH:
+        if source.get(name):
+            safe[name] = source[name]
+    return safe
+
+
+def run_bash(command, workspace, timeout, environ=None):
     # Collect output in a temp file rather than a pipe: a backgrounded server inherits
     # the child's stdout, and draining a pipe to EOF would block until that server exits.
     with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as sink:
+        process = subprocess.Popen(
+            ["bash", "-c", command],
+            cwd=workspace,
+            stdin=subprocess.DEVNULL,
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            env=child_environment(environ),
+            # Its own process group, so a command that hangs can be cleaned up
+            # along with everything it spawned instead of leaving the runner with
+            # orphans holding ports open.
+            start_new_session=os.name == "posix",
+        )
         try:
-            completed = subprocess.run(
-                ["bash", "-c", command],
-                cwd=workspace,
-                stdin=subprocess.DEVNULL,
-                stdout=sink,
-                stderr=subprocess.STDOUT,
-                timeout=timeout,
-            )
-            header = "exit code: %d" % completed.returncode
+            returncode = process.wait(timeout=timeout)
+            header = "exit code: %d" % returncode
         except subprocess.TimeoutExpired:
-            header = "command timed out after %ds (background long-running servers with &)" % timeout
+            _terminate(process)
+            header = (
+                "command timed out after %ds and was killed "
+                "(background long-running servers with &)" % timeout
+            )
         sink.seek(0)
         output = sink.read()
 
@@ -112,7 +159,24 @@ def run_bash(command, workspace, timeout):
     return "%s\n%s" % (header, output or "(no output)")
 
 
-def render_report(arguments):
+def _terminate(process):
+    """Stop a timed-out command and anything it started."""
+    for send, wait in ((signal.SIGTERM, GRACE_SECONDS), (signal.SIGKILL, GRACE_SECONDS)):
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(process.pid), send)
+            else:
+                process.kill()
+        except (ProcessLookupError, PermissionError, OSError):
+            return
+        try:
+            process.wait(timeout=wait)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def render_report(arguments, footer=""):
     """Turn submit_report arguments into the Markdown comment body."""
     status = str(arguments.get("status", "")).upper()
     if status not in VALID_STATUSES:
@@ -128,7 +192,41 @@ def render_report(arguments):
         value = (arguments.get(key) or "").strip()
         if value:
             sections += ["", "### %s" % heading, "", value]
+    if footer.strip():
+        sections += ["", footer.strip()]
     return status, "\n".join(sections)
+
+
+def render_artifacts(artifacts_dir, run_url):
+    """List whatever the agent saved, so screenshots reach the reviewer.
+
+    A PR comment cannot carry an image the agent produced, so the files are
+    uploaded as a workflow artifact and the report points at them.
+    """
+    names = collect_artifacts(artifacts_dir)
+    if not names:
+        return ""
+    lines = ["### Artifacts", ""]
+    lines += ["- `%s`" % name for name in names]
+    if run_url:
+        lines += ["", "Download them from the [workflow run](%s)." % run_url]
+    else:
+        lines += ["", "Attached to this workflow run."]
+    return "\n".join(lines)
+
+
+def collect_artifacts(artifacts_dir, limit=50):
+    """Relative paths of the files the agent left behind, sorted and capped."""
+    if not artifacts_dir or not os.path.isdir(artifacts_dir):
+        return []
+    names = []
+    for root, _, files in os.walk(artifacts_dir):
+        for name in files:
+            names.append(os.path.relpath(os.path.join(root, name), artifacts_dir))
+    names.sort()
+    if len(names) > limit:
+        names = names[:limit] + ["… and %d more" % (len(names) - limit)]
+    return names
 
 
 def parse_arguments(raw):
