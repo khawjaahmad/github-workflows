@@ -52,4 +52,5 @@ jobs:
         with:
           api_key: ${{ secrets.LLM_API_KEY }}
           provider: zai
+          effort: max
           pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}

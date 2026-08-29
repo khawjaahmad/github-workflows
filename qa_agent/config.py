@@ -8,7 +8,7 @@ from dataclasses import dataclass
 PROVIDERS = {
     "zai": {
         "base_url": "https://api.z.ai/api/coding/paas/v4",
-        "model": "glm-4.6",
+        "model": "glm-5.3",
     },
     "openai": {
         "base_url": "https://api.openai.com/v1",
@@ -39,6 +39,7 @@ class Config:
     command_timeout: int
     post_comment: bool
     setup_command: str
+    effort: str
 
 
 def _env(name, default=""):
@@ -91,4 +92,5 @@ def from_env():
         command_timeout=int(_env("QA_COMMAND_TIMEOUT", "300")),
         post_comment=_env("QA_POST_COMMENT", "true").lower() == "true",
         setup_command=_env("QA_SETUP_COMMAND"),
+        effort=_env("QA_EFFORT"),
     )
