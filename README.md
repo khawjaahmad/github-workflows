@@ -45,7 +45,7 @@ that implements it works. `provider` picks the defaults:
 
 | `provider` | Base URL                                                 | Default `model`    |
 | ---------- | -------------------------------------------------------- | ------------------ |
-| `zai`      | `https://api.z.ai/api/coding/paas/v4`                    | `glm-4.6`          |
+| `zai`      | `https://api.z.ai/api/coding/paas/v4`                    | `glm-5.3`          |
 | `openai`   | `https://api.openai.com/v1`                              | `gpt-5`            |
 | `gemini`   | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-pro`   |
 | `custom`   | set `base_url` yourself                                   | set `model` yourself |
@@ -72,6 +72,30 @@ change here:
 
 The provider must support OpenAI-style function calling — the agent drives everything through
 two tools, `bash` and `submit_report`.
+
+### Reasoning effort
+
+`effort` is sent as the OpenAI-standard `reasoning_effort` field, passed through verbatim.
+Leave it unset to keep the model's own default. The levels are **provider-specific**:
+
+| Provider          | Accepted levels                    | Default |
+| ----------------- | ---------------------------------- | ------- |
+| z.ai `glm-5.3`    | `low`, `high`, `max`               | `max`   |
+| OpenAI            | `low`, `medium`, `high`, `xhigh`   | model-dependent |
+| Gemini            | `low`, `medium`, `high`            | model-dependent |
+
+```yaml
+      - uses: khawjaahmad/github-workflows@main
+        with:
+          api_key: ${{ secrets.LLM_API_KEY }}
+          provider: zai
+          effort: max # deep reasoning — QA runs are multi-step and tool-heavy
+```
+
+Values are not validated locally, so a level a provider does not recognise is the provider's
+to reject — or to ignore. `glm-5.3` in particular **silently falls back to `max`** for any
+unrecognised value rather than erroring, so `xhigh` there is a no-op, not a failure. GLM-5.3
+also always reasons; thinking cannot be disabled.
 
 ## Inputs
 

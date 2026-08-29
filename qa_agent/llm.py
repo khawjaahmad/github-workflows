@@ -40,6 +40,12 @@ def complete(config, messages, tools, timeout=300, attempts=4):
         "tools": tools,
         "tool_choice": "auto",
     }
+    # Reasoning effort is passed through verbatim: each provider has its own
+    # vocabulary (z.ai low/high/max, OpenAI low/medium/high/xhigh), and a new
+    # level should not need a change here. Omitted entirely when unset, so the
+    # model keeps its own default.
+    if config.effort:
+        payload["reasoning_effort"] = config.effort
 
     last_error = None
     for attempt in range(attempts):

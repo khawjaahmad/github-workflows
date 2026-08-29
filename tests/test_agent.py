@@ -60,12 +60,12 @@ class AgentLoopTest(unittest.TestCase):
         self.addCleanup(self.server.shutdown)
         self.workspace = tempfile.mkdtemp()
 
-    def config(self, max_turns=10):
+    def config(self, max_turns=10, effort=""):
         host, port = self.server.server_address
         return config_module.Config(
             api_key="test-key",
             base_url="http://%s:%d/v1" % (host, port),
-            model="glm-4.6",
+            model="glm-5.3",
             provider="zai",
             github_token="token",
             repo="acme/widget",
@@ -75,6 +75,7 @@ class AgentLoopTest(unittest.TestCase):
             command_timeout=30,
             post_comment=False,
             setup_command="",
+            effort=effort,
         )
 
     def test_runs_commands_then_reports(self):
@@ -117,6 +118,36 @@ class AgentLoopTest(unittest.TestCase):
         self.assertEqual(
             sorted(t["function"]["name"] for t in first["tools"]), ["bash", "submit_report"]
         )
+
+    def test_effort_is_sent_verbatim_when_set(self):
+        self.server.turns = [
+            {
+                "content": None,
+                "tool_calls": [
+                    tool_call("submit_report", {"status": "PASS", "changes_tested": "-", "evidence": "-"})
+                ],
+            }
+        ]
+
+        agent.run(self.config(effort="max"), PULL_REQUEST, "")
+
+        # Passed through unvalidated — provider vocabularies differ (z.ai
+        # low/high/max, OpenAI low/medium/high/xhigh).
+        self.assertEqual(self.server.requests[0]["reasoning_effort"], "max")
+
+    def test_effort_is_omitted_when_unset(self):
+        self.server.turns = [
+            {
+                "content": None,
+                "tool_calls": [
+                    tool_call("submit_report", {"status": "PASS", "changes_tested": "-", "evidence": "-"})
+                ],
+            }
+        ]
+
+        agent.run(self.config(), PULL_REQUEST, "")
+
+        self.assertNotIn("reasoning_effort", self.server.requests[0])
 
     def test_gives_up_after_max_turns(self):
         self.server.turns = [
@@ -174,7 +205,7 @@ class UnitTest(unittest.TestCase):
         )
         config = config_module.from_env()
         self.assertEqual(config.base_url, "https://api.z.ai/api/coding/paas/v4")
-        self.assertEqual(config.model, "glm-4.6")
+        self.assertEqual(config.model, "glm-5.3")
 
         os.environ["QA_PROVIDER"] = "gemini"
         os.environ["QA_MODEL"] = "gemini-2.5-flash"
