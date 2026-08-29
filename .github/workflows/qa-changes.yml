@@ -1,0 +1,55 @@
+name: QA Changes
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to QA
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: qa-changes-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+    steps:
+      # QA needs a provider key. Skip rather than fail so the check does not go red
+      # on every repository that has not configured the secret yet.
+      - name: Check that LLM_API_KEY is configured
+        id: preflight
+        run: |
+          if [ -z "$LLM_API_KEY" ]; then
+            echo "LLM_API_KEY is not set — skipping QA. Add it under Settings → Secrets and variables → Actions." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the pull request
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr_number) }}
+          # Full history so the agent can diff against, and check out, the base branch.
+          fetch-depth: 0
+
+      - name: QA the changes
+        if: steps.preflight.outputs.ready == 'true'
+        # In your own repository use: khawjaahmad/github-workflows@main
+        uses: ./
+        with:
+          api_key: ${{ secrets.LLM_API_KEY }}
+          provider: zai
+          pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
