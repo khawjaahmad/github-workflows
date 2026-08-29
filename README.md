@@ -92,6 +92,11 @@ two tools, `bash` and `submit_report`.
 Output `status` is `PASS`, `FAIL` or `PARTIAL`. The step exits non-zero on `FAIL`, so a broken
 PR fails the check; `PARTIAL` does not.
 
+Without an API key the action stops with a configuration error. This repository's own
+`.github/workflows/qa-changes.yml` guards the job with a preflight step that skips QA when
+`LLM_API_KEY` is unset — worth copying if you are rolling the workflow out before the secret
+is in place.
+
 ## Repository-specific QA guidelines
 
 If `.agents/skills/qa-guide.md` exists, the agent reads it during setup and treats it as
