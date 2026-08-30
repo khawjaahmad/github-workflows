@@ -3,6 +3,13 @@ name: QA Changes
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # Nothing to run for a documentation-only change. paths-ignore skips only
+    # when every changed file matches, so a PR touching code and docs together
+    # still runs. Do not add this if QA is ever a required check: a skipped
+    # workflow reports no conclusion and the pull request blocks forever.
+    paths-ignore:
+      - "**.md"
+      - LICENSE
   workflow_dispatch:
     inputs:
       pr_number:

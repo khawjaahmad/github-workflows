@@ -23,7 +23,12 @@ organization one, which is how you give a single repo a different model.
 
 ## 2. Add the workflow
 
-Copy this into `.github/workflows/qa-changes.yml`:
+Two ways in. Use the first unless you have a reason not to.
+
+### Call the reusable workflow (recommended)
+
+The preflight, the checkout, the permissions and the action call all live in this repository
+as a reusable workflow. Each of your repos gets a stub in `.github/workflows/qa-changes.yml`:
 
 ```yaml
 name: QA Changes
@@ -31,6 +36,56 @@ name: QA Changes
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # Nothing to run for a docs-only change.
+    paths-ignore:
+      - "**.md"
+
+jobs:
+  qa:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: khawjaahmad/github-workflows/.github/workflows/qa.yml@v1
+    secrets: inherit
+    with:
+      model: ${{ vars.LLM_MODEL }}
+```
+
+That is the whole file. The payoff is that *workflow* fixes propagate too, not just action
+fixes — if the preflight or the checkout needs changing, it changes here and every repo has it
+on their next pull request.
+
+Four things about it are worth understanding:
+
+- **`permissions` goes in the caller.** A called workflow can only maintain or reduce the
+  caller's token permissions, never elevate them. Without `pull-requests: write` here the
+  report cannot be posted; the run still succeeds and writes it to the job summary instead.
+- **`secrets: inherit`** passes your organization's `LLM_API_KEY` through. It works within one
+  organization or enterprise — across organizations, pass it explicitly with
+  `secrets: {llm_api_key: ${{ secrets.LLM_API_KEY }}}`.
+- **The trigger stays with you.** A reusable workflow cannot define its own `paths-ignore` or
+  decide whether to run on drafts, and that is the right split: each repo knows what is worth
+  a QA run.
+- **`model` is passed explicitly** rather than read from `vars` inside, so it resolves from
+  your repository or organization variables with no ambiguity.
+
+Optional inputs mirror the action's: `provider`, `base_url`, `effort`, `fail_on`,
+`context_tokens`, `setup_command`, `max_turns`, `time_budget`, `runs_on`, `timeout_minutes`.
+The job exposes a `status` output carrying the verdict.
+
+### Copy the full workflow
+
+Take this if you want to change the steps themselves — a different checkout, extra services,
+an exact pin on the action. It is the longer form of exactly what the reusable workflow does:
+
+```yaml
+name: QA Changes
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**.md"
 
 permissions:
   contents: read
@@ -81,31 +136,48 @@ jobs:
           fail_on: none
 ```
 
-Three things in there are load-bearing:
+Whichever form you use, three things are load-bearing: `pull-requests: write`, or the report
+cannot be posted; `fetch-depth: 0`, or bug-fix pull requests lose the before/after comparison
+that is the most convincing evidence the agent produces; and a `timeout-minutes` comfortably
+above `time_budget`, so the agent finishes on its own budget rather than the runner's.
 
-- **`pull-requests: write`** — without it the report cannot be posted. The run still succeeds
-  and writes the report to the job summary, with an error annotation explaining why.
-- **`fetch-depth: 0`** — without it the agent cannot reach the base commit, and bug-fix PRs
-  lose the before/after comparison that is the most convincing evidence it produces.
-- **`timeout-minutes: 30`** — keep it comfortably above `time_budget` (default 1500s). A job
-  the runner kills is signalled first, so a report still gets out, but the agent should be
-  finishing on its own budget rather than on the runner's.
+Start at `fail_on: none` so the check reports without blocking merges. Drop it once you have
+read a few reports from that codebase and trust the verdicts.
 
-Start at `fail_on: none` so the check reports without blocking merges. Drop the line once you
-have read a few reports from that codebase and trust the verdicts.
+### Getting the file into many repositories
+
+A **workflow template** in your organization's `.github` repository puts "QA Changes" in the
+*New workflow* list for every repo, so adding it is two clicks. On GitHub Enterprise Cloud, an
+**organization required workflow** goes further and applies it to selected repositories with
+no file in them at all.
 
 ## 3. Pin a version
 
-`@main` tracks whatever lands in this repository, so a change here changes QA behaviour
-everywhere at once. Tag instead:
+`@main` tracks whatever lands here, so a change to this repository changes QA behaviour in
+every consumer at once, with nothing in their history to explain it. Tag instead:
+
+- **`v1.0.0`** never moves. For an exact freeze.
+- **`v1`** is deliberately moved to the newest `v1.x.x`. Consumers write `@v1` and get fixes
+  without ever getting a breaking change — those go to `v2`, and they move when they choose.
+
+This is the same mechanism as `actions/checkout@v4`; that tag has moved many times.
+
+Releasing, from this repository:
 
 ```bash
+# The reusable workflow pins the action it runs. Bump that line to the version
+# being released, commit it, and only then tag — so the tag and the code it runs
+# are the same commit.
 git tag -a v1.0.0 -m "qa-changes v1.0.0" && git push origin v1.0.0
-git tag -f v1 && git push -f origin v1          # moving major, the usual convention
+git tag -f v1 && git push -f origin v1
 ```
 
-Consumers then use `@v1` and get fixes without surprises, or `@v1.0.0` to freeze exactly.
 **`v1` does not exist yet** — until it is created, the examples above need `@main`.
+
+What counts as breaking, and so needs a `v2`: removing or renaming an input, making an
+optional one required, or changing a default that people depend on. This repository already
+has one such change in its history — `model` became required when the stale default model id
+was removed. Bug fixes and new optional inputs do not break anyone and belong in `v1`.
 
 ## 4. Tune it for the repository
 
