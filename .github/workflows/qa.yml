@@ -1,0 +1,151 @@
+name: QA Changes (reusable)
+
+# The pipeline template. Consumer repositories call this instead of copying the
+# preflight, the checkout and the permissions into every repo — so a fix here
+# reaches all of them without touching a single consumer file.
+#
+#   jobs:
+#     qa:
+#       permissions:
+#         contents: read
+#         pull-requests: write
+#       uses: khawjaahmad/github-workflows/.github/workflows/qa.yml@v1
+#       secrets: inherit
+#       with:
+#         model: ${{ vars.LLM_MODEL }}
+#
+# The trigger stays with the caller, which is where it belongs: each repository
+# decides whether to run on drafts, and what paths are not worth a QA run.
+#
+# Note for maintainers: the action step below cannot use `./`. Inside a reusable
+# workflow that resolves to the *caller's* checkout, not this repository, so the
+# reference is pinned to a tag. Bump it in the release commit, before tagging, so
+# the tag and the action it runs are the same code. This repository's own
+# qa-changes.yml deliberately does not call this workflow — it uses `./` so that
+# a pull request is QA'd by its own code rather than by the last release.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: >-
+          Model id. Pass `${{ vars.LLM_MODEL }}` from the caller. Left empty, QA
+          is skipped with a message rather than failing the check.
+        required: false
+        type: string
+        default: ""
+      provider:
+        description: "zai, openai, gemini or custom."
+        required: false
+        type: string
+        default: zai
+      base_url:
+        description: OpenAI-compatible base URL; required when provider is custom.
+        required: false
+        type: string
+        default: ""
+      effort:
+        description: Reasoning effort, passed to the provider verbatim.
+        required: false
+        type: string
+        default: ""
+      fail_on:
+        description: >-
+          Verdicts that fail the check, or `none` to stay green while you are
+          still building trust in the reports.
+        required: false
+        type: string
+        default: FAIL
+      context_tokens:
+        description: The model's context window, so the agent compacts before reaching it.
+        required: false
+        type: number
+        default: 0
+      setup_command:
+        description: Command the agent runs before it starts testing.
+        required: false
+        type: string
+        default: ""
+      max_turns:
+        description: Model turns before the agent is told to wrap up.
+        required: false
+        type: number
+        default: 40
+      time_budget:
+        description: Wall-clock seconds before the agent is told to wrap up.
+        required: false
+        type: number
+        default: 1500
+      runs_on:
+        description: Runner label. The default image carries the browsers and databases.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout. Keep it comfortably above time_budget.
+        required: false
+        type: number
+        default: 30
+    secrets:
+      llm_api_key:
+        description: >-
+          Provider API key. With `secrets: inherit` the LLM_API_KEY secret is
+          picked up automatically and this can be omitted.
+        required: false
+    outputs:
+      status:
+        description: The QA verdict — PASS, FAIL or PARTIAL.
+        value: ${{ jobs.qa.outputs.status }}
+
+jobs:
+  qa:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.qa.outputs.status }}
+    steps:
+      # A key and a model are configuration, and a pull request from a fork gets
+      # neither — forks receive no secrets. Skip with an explanation rather than
+      # putting a red check on every fork contribution.
+      - name: Check that the provider is configured
+        id: preflight
+        env:
+          LLM_API_KEY: ${{ secrets.llm_api_key || secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ inputs.model }}
+        run: |
+          missing=""
+          if [ -z "$LLM_API_KEY" ]; then missing="$missing LLM_API_KEY"; fi
+          if [ -z "$LLM_MODEL" ]; then missing="$missing model"; fi
+          if [ -n "$missing" ]; then
+            echo "Skipping QA — not set:$missing. See https://github.com/khawjaahmad/github-workflows/blob/main/USAGE.md" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the pull request
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Full history, so the agent can check out the base commit and compare
+          # behaviour before and after a fix.
+          fetch-depth: 0
+
+      - name: QA the changes
+        id: qa
+        if: steps.preflight.outputs.ready == 'true'
+        uses: khawjaahmad/github-workflows@v1
+        with:
+          api_key: ${{ secrets.llm_api_key || secrets.LLM_API_KEY }}
+          model: ${{ inputs.model }}
+          provider: ${{ inputs.provider }}
+          base_url: ${{ inputs.base_url }}
+          effort: ${{ inputs.effort }}
+          fail_on: ${{ inputs.fail_on }}
+          context_tokens: ${{ inputs.context_tokens }}
+          setup_command: ${{ inputs.setup_command }}
+          max_turns: ${{ inputs.max_turns }}
+          time_budget: ${{ inputs.time_budget }}
+          pr_number: ${{ github.event.pull_request.number }}

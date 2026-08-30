@@ -40,6 +40,9 @@ are never accepted as substitutes for running the thing.
 
 ## Quick start
 
+Rolling this out across several repositories — organization-level configuration, fork-safe
+workflows, version pinning — is covered in [USAGE.md](USAGE.md).
+
 1. Add your provider key as `LLM_API_KEY` and your model id as `LLM_MODEL` under
    **Settings → Secrets and variables → Actions**.
 2. Copy this workflow into `.github/workflows/qa-changes.yml`:
@@ -72,7 +75,9 @@ jobs:
 ```
 
 Start with `fail_on: none` if you would rather see a few reports before the check can block a
-merge.
+merge. This minimal form has no guard for a missing key, so on a public repository that takes
+pull requests from forks — which get no secrets — use the preflight version in
+[USAGE.md](USAGE.md) instead, or every fork PR gets a red check.
 
 ## Providers
 
