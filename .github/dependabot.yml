@@ -1,0 +1,16 @@
+version: 2
+
+# The agent has no third-party Python dependencies — it is standard library
+# only — so there is no pip ecosystem here. What does age is the actions this
+# repository pins: actions/checkout, actions/setup-python and
+# actions/upload-artifact, in action.yml and in the workflows.
+updates:
+  - package-ecosystem: github-actions
+    # `/` covers both `.github/workflows/` and the `action.yml` at the root.
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    labels:
+      - dependencies
