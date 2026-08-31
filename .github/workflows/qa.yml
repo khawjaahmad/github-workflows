@@ -101,7 +101,7 @@ jobs:
       - name: QA the changes
         id: qa
         if: steps.preflight.outputs.ready == 'true'
-        uses: khawjaahmad/github-workflows@v1.0.0
+        uses: khawjaahmad/github-workflows@v1.1.0
         with:
           api_key: ${{ secrets.llm_api_key || secrets.LLM_API_KEY }}
           model: ${{ inputs.model }}
