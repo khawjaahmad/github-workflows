@@ -96,7 +96,7 @@ reusable workflows just need another file in `.github/workflows/`.
 python -m unittest discover -s tests -v
 ```
 
-The tests run the whole action — configuration, agent loop, tools and comment upsert — against
+The tests run the whole action — configuration, agent loop, tools and comment posting — against
 stub OpenAI-compatible and GitHub servers. No API key and no network needed.
 
 ## License

@@ -291,16 +291,17 @@ third-party dependencies — just the standard library.
 | Module                     | Role                                                             |
 | -------------------------- | ---------------------------------------------------------------- |
 | `qa_agent/config.py`       | Resolves provider, endpoint and budgets from the action inputs.   |
+| `qa_agent/endpoints.py`    | Loads `data/endpoints.json`, the one place a URL is written.       |
 | `qa_agent/llm.py`          | OpenAI-compatible `/chat/completions` client, with retries.       |
-| `qa_agent/github.py`       | Reads the PR and diff; posts or updates the report comment.       |
+| `qa_agent/github.py`       | Reads the PR and diff; posts the report comment.                  |
 | `qa_agent/environment.py`  | Fingerprints the checkout so the prompt assumes no stack.         |
 | `qa_agent/prompt.py`       | The four-phase QA methodology given to the model.                 |
 | `qa_agent/tools.py`        | The `bash` and `submit_report` tools, and report rendering.       |
 | `qa_agent/history.py`      | Keeps the transcript inside the context window.                   |
 | `qa_agent/agent.py`        | The turn loop: call the model, run its tools, collect the report. |
 
-Re-running on the same PR edits the existing report comment rather than adding another, and
-finds it however far down the thread it has been pushed.
+Every run posts its own comment, prefixed with the commit it covers, so the pull request
+keeps the whole QA history rather than only the latest verdict.
 
 ## Development
 
@@ -308,5 +309,5 @@ finds it however far down the thread it has been pushed.
 python -m unittest discover -s tests -v
 ```
 
-The tests run the whole action — configuration, agent loop, tools and comment upsert — against
+The tests run the whole action — configuration, agent loop, tools and comment posting — against
 stub OpenAI-compatible and GitHub servers. No API key and no network needed.
