@@ -1,4 +1,4 @@
-"""The GitHub client: finding, posting and updating the report comment."""
+"""The GitHub client: reading the pull request and posting the report comment."""
 
 import os
 import sys
@@ -23,40 +23,24 @@ class ReportCommentTest(unittest.TestCase):
         self.addCleanup(setattr, github, "API_ROOT", patched)
         return server
 
-    def test_posts_when_there_is_no_previous_report(self):
+    def test_posts_a_report(self):
         server = self.serve([{"id": 1, "body": "looks good to me"}])
 
-        github.upsert_report("token", "acme/widget", 7, "## QA Report")
+        github.post_report("token", "acme/widget", 7, "## QA Report")
 
         self.assertEqual(len(server.comments), 2)
-        self.assertIn(github.REPORT_MARKER, server.comments[-1]["body"])
+        self.assertIn("## QA Report", server.comments[-1]["body"])
         self.assertIn("POST", [method for method, _, _ in server.calls])
 
-    def test_updates_its_own_previous_report(self):
-        server = self.serve([{"id": 42, "body": github.REPORT_MARKER + "\nold report"}])
+    def test_a_rerun_adds_a_report_instead_of_replacing_the_last_one(self):
+        server = self.serve([{"id": 42, "body": "## QA Report\n\n**Status: FAIL**"}])
 
-        github.upsert_report("token", "acme/widget", 7, "## QA Report\nnew")
+        github.post_report("token", "acme/widget", 7, "## QA Report\n\n**Status: PASS**")
 
-        self.assertEqual(len(server.comments), 1)
-        self.assertIn("new", server.comments[0]["body"])
-        self.assertIn("PATCH", [method for method, _, _ in server.calls])
-
-    def test_finds_a_report_beyond_the_first_page(self):
-        comments = [{"id": index, "body": "chatter"} for index in range(250)]
-        comments[240] = {"id": 240, "body": github.REPORT_MARKER + "\nold report"}
-        server = self.serve(comments)
-
-        github.upsert_report("token", "acme/widget", 7, "## QA Report\nnew")
-
-        self.assertEqual(len(server.comments), 250)
-        self.assertIn("new", server.comments[240]["body"])
-        pages = [query for method, _, query in server.calls if method == "GET"]
-        self.assertEqual(len(pages), 3)
-
-    def test_stops_paging_at_the_end(self):
-        server = self.serve([{"id": 1, "body": "chatter"}])
-        self.assertIsNone(github.find_report("token", "acme/widget", 7))
-        self.assertEqual(len([c for c in server.calls if c[0] == "GET"]), 1)
+        self.assertEqual(len(server.comments), 2)
+        self.assertIn("FAIL", server.comments[0]["body"])
+        self.assertIn("PASS", server.comments[1]["body"])
+        self.assertNotIn("PATCH", [method for method, _, _ in server.calls])
 
     def test_errors_carry_the_status_and_body(self):
         self.serve()

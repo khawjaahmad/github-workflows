@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from support import GitHubServer, LLMServer, bash_turn, report_turn, tool_call  # noqa: E402
 
-from qa_agent import __main__ as entry, github  # noqa: E402
+from qa_agent import __main__ as entry  # noqa: E402
 
 
 class EndToEndTest(unittest.TestCase):
@@ -87,7 +87,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(api.comments), 1)
         posted = api.comments[0]["body"]
-        self.assertIn(github.REPORT_MARKER, posted)
+        self.assertIn("QA of commit ", posted)
         self.assertIn("**Status: PASS**", posted)
         self.assertIn("curl localhost:8080/health", posted)
         self.assertEqual(self.read("output").strip(), "status=PASS")
@@ -102,19 +102,20 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(entry.main(), 1)
         self.assertIn("**Status: FAIL**", api.comments[0]["body"])
 
-    def test_a_rerun_updates_the_previous_report(self):
+    def test_a_rerun_leaves_the_previous_report_in_place(self):
         _, api = self.serve(
             [report_turn("PASS")],
             comments=[
                 {"id": 5, "body": "a human comment"},
-                {"id": 6, "body": github.REPORT_MARKER + "\n## QA Report\n\n**Status: FAIL**"},
+                {"id": 6, "body": "## QA Report\n\n**Status: FAIL**"},
             ],
         )
 
         entry.main()
 
-        self.assertEqual(len(api.comments), 2)
-        self.assertIn("**Status: PASS**", api.comments[1]["body"])
+        self.assertEqual(len(api.comments), 3)
+        self.assertIn("**Status: FAIL**", api.comments[1]["body"])
+        self.assertIn("**Status: PASS**", api.comments[2]["body"])
 
     def test_the_agents_commands_cannot_read_the_secrets(self):
         llm, api = self.serve(

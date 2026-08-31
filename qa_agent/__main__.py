@@ -37,6 +37,7 @@ def main():
         return 2
 
     status, body = agent.run(config, pull_request, diff)
+    body = _label(body, pull_request)
     agent.log("\n%s" % body)
     _publish(config, status, body)
     return 1 if status in config.fail_on else 0
@@ -53,11 +54,17 @@ def _diff_budget(config):
     return max(20000, min(DIFF_CHARS, window // 8))
 
 
+def _label(body, pull_request):
+    """Name the commit the report covers, since reports accumulate on the PR."""
+    sha = ((pull_request or {}).get("head") or {}).get("sha") or ""
+    return "QA of commit %s\n\n%s" % (sha, body) if sha else body
+
+
 def _publish(config, status, body):
     """Get the report in front of the reviewer, by every route available."""
     if config.post_comment:
         try:
-            github.upsert_report(
+            github.post_report(
                 config.github_token,
                 config.repo,
                 config.pr_number,

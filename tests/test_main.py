@@ -77,14 +77,14 @@ class MainTest(unittest.TestCase):
 
     def test_the_report_is_posted_when_asked(self):
         os.environ["QA_POST_COMMENT"] = "true"
-        with mock.patch.object(github, "upsert_report") as upsert:
+        with mock.patch.object(github, "post_report") as post:
             self.run_with("PASS")
-        self.assertIn("**Status: PASS**", upsert.call_args[0][3])
+        self.assertIn("**Status: PASS**", post.call_args[0][3])
 
     def test_a_posting_failure_does_not_discard_the_report(self):
         os.environ["QA_POST_COMMENT"] = "true"
         with mock.patch.object(
-            github, "upsert_report", side_effect=github.GitHubError("403 forbidden")
+            github, "post_report", side_effect=github.GitHubError("403 forbidden")
         ):
             code = self.run_with("PASS")
 

@@ -4,10 +4,7 @@ import json
 import urllib.error
 import urllib.request
 
-API_ROOT = "https://api.github.com"
-REPORT_MARKER = "<!-- qa-changes-report -->"
-PER_PAGE = 100
-MAX_PAGES = 20
+from .endpoints import GITHUB_API_ROOT as API_ROOT
 
 
 class GitHubError(Exception):
@@ -56,37 +53,8 @@ def get_diff(token, repo, number, max_chars=120000, api_root=None):
     return diff
 
 
-def find_report(token, repo, number, api_root=None):
-    """The id of this agent's existing report comment, if it posted one."""
-    for page in range(1, MAX_PAGES + 1):
-        comments = _call(
-            token,
-            "GET",
-            "/repos/%s/issues/%d/comments?per_page=%d&page=%d" % (repo, number, PER_PAGE, page),
-            api_root=api_root,
-        )
-        if not isinstance(comments, list) or not comments:
-            return None
-        for comment in comments:
-            if REPORT_MARKER in (comment.get("body") or ""):
-                return comment["id"]
-        if len(comments) < PER_PAGE:
-            return None
-    return None
-
-
-def upsert_report(token, repo, number, body, api_root=None):
-    """Post the QA report, replacing this agent's previous report if present."""
-    body = "%s\n%s" % (REPORT_MARKER, body)
-    existing = find_report(token, repo, number, api_root=api_root)
-    if existing is not None:
-        return _call(
-            token,
-            "PATCH",
-            "/repos/%s/issues/comments/%d" % (repo, existing),
-            body={"body": body},
-            api_root=api_root,
-        )
+def post_report(token, repo, number, body, api_root=None):
+    """Post the QA report as a new comment, leaving earlier reports in place."""
     return _call(
         token,
         "POST",
