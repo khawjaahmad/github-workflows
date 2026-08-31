@@ -1,7 +1,8 @@
-# Using qa-changes in your repositories
+# Rolling QA Changes out across repositories
 
-How to put this action on a repository other than this one. For what the agent does and how
-it is configured, see [README.md](README.md); this file is about rollout.
+How to put the QA Changes action on a repository other than this one. For what the agent does
+and how it is configured, see the [QA Changes reference](docs/qa-changes.md); this file is
+about rollout. [README.md](README.md) indexes everything else this repository publishes.
 
 ## 1. Configure the provider once, for the whole org
 

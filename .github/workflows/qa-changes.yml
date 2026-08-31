@@ -61,7 +61,7 @@ jobs:
 
       - name: QA the changes
         if: steps.preflight.outputs.ready == 'true'
-        # In your own repository use: khawjaahmad/github-workflows@main
+        # In your own repository use: khawjaahmad/github-workflows@v1
         uses: ./
         with:
           api_key: ${{ secrets.LLM_API_KEY }}
