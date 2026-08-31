@@ -3,11 +3,7 @@
 import os
 from dataclasses import dataclass, field
 
-PROVIDERS = {
-    "zai": "https://api.z.ai/api/coding/paas/v4",
-    "openai": "https://api.openai.com/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
-}
+from .endpoints import GITHUB_API_ROOT, PROVIDERS
 
 VALID_STATUSES = ("PASS", "FAIL", "PARTIAL")
 
@@ -37,7 +33,7 @@ class Config:
     context_headroom: float = 0.8
     artifacts_dir: str = ""
     run_url: str = ""
-    github_api_url: str = "https://api.github.com"
+    github_api_url: str = GITHUB_API_ROOT
     fail_on: tuple = field(default_factory=lambda: ("FAIL",))
 
 
@@ -128,6 +124,6 @@ def from_env():
         context_tokens=_int("QA_CONTEXT_TOKENS", "0"),
         artifacts_dir=_env("QA_ARTIFACTS_DIR"),
         run_url=_env("QA_RUN_URL"),
-        github_api_url=_env("QA_GITHUB_API_URL", "https://api.github.com").rstrip("/"),
+        github_api_url=_env("QA_GITHUB_API_URL", GITHUB_API_ROOT).rstrip("/"),
         fail_on=parse_fail_on(_env("QA_FAIL_ON", "FAIL")),
     )

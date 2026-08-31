@@ -1,0 +1,8 @@
+{
+  "github_api_root": "https://api.github.com",
+  "providers": {
+    "zai": "https://api.z.ai/api/coding/paas/v4",
+    "openai": "https://api.openai.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai"
+  }
+}
