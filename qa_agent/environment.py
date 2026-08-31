@@ -1,16 +1,9 @@
-"""Describes the repository and the toolchain available to the agent.
-
-The agent must work in a Go repo, a Rails repo or a Gradle repo without being
-told which it is in, so the prompt carries a fingerprint of what is actually
-present instead of assuming a stack.
-"""
+"""Describes the repository and the toolchain available to the agent."""
 
 import os
 import platform
 import shutil
 
-# Root-level files that identify how a project is built and run. Presence is the
-# signal; the agent decides what to do with it.
 MARKERS = (
     ("package.json", "Node.js"),
     ("pnpm-lock.yaml", "pnpm"),
@@ -41,18 +34,51 @@ MARKERS = (
     ("Procfile", "Procfile"),
 )
 
-# Interpreters, package managers, service tooling and browsers worth knowing about.
 COMMANDS = (
-    "node", "npm", "pnpm", "yarn", "bun", "npx", "deno",
-    "python3", "pip3", "uv", "poetry", "pipenv",
-    "go", "cargo", "rustc", "java", "mvn", "gradle",
-    "ruby", "bundle", "php", "composer", "dotnet", "swift",
-    "make", "just", "cmake", "docker", "docker-compose",
-    "curl", "wget", "jq", "git", "psql", "mysql", "sqlite3", "redis-cli",
-    "google-chrome", "chromium", "chromium-browser", "firefox", "chromedriver",
+    "node",
+    "npm",
+    "pnpm",
+    "yarn",
+    "bun",
+    "npx",
+    "deno",
+    "python3",
+    "pip3",
+    "uv",
+    "poetry",
+    "pipenv",
+    "go",
+    "cargo",
+    "rustc",
+    "java",
+    "mvn",
+    "gradle",
+    "ruby",
+    "bundle",
+    "php",
+    "composer",
+    "dotnet",
+    "swift",
+    "make",
+    "just",
+    "cmake",
+    "docker",
+    "docker-compose",
+    "curl",
+    "wget",
+    "jq",
+    "git",
+    "psql",
+    "mysql",
+    "sqlite3",
+    "redis-cli",
+    "google-chrome",
+    "chromium",
+    "chromium-browser",
+    "firefox",
+    "chromedriver",
 )
 
-# Files the agent should read before it starts, in priority order.
 GUIDE_FILES = (
     ".agents/skills/qa-guide.md",
     "AGENTS.md",
@@ -89,12 +115,7 @@ def probe(workspace):
 
 
 def read_guide(workspace, max_chars=20000):
-    """Return the repository's QA guide, if it has one.
-
-    Read here rather than left for the agent to discover: it is the one file
-    whose instructions outrank the agent's own defaults, so it should never be
-    missed because the model forgot to look.
-    """
+    """Return the repository's QA guide, if it has one."""
     path = os.path.join(workspace, ".agents", "skills", "qa-guide.md")
     if not os.path.isfile(path):
         return ""

@@ -48,13 +48,11 @@ class AgentTest(AgentTestCase):
         self.assertIn("**Status: PASS**", body)
         self.assertIn("### Evidence", body)
 
-        # The real command output must come back to the model.
         result = [m for m in server.requests[1]["messages"] if m["role"] == "tool"][0]
         self.assertEqual(result["tool_call_id"], "call_1")
         self.assertIn("hello-from-qa", result["content"])
         self.assertIn("exit code: 0", result["content"])
 
-        # PR context and both tools reach the provider.
         first = server.requests[0]
         self.assertIn("Add /api/health endpoint", first["messages"][1]["content"])
         self.assertEqual(
@@ -64,7 +62,6 @@ class AgentTest(AgentTestCase):
     def test_effort_is_sent_verbatim_when_set(self):
         server = self.serve([report_turn()])
         agent.run(self.config(server, effort="max"), PULL_REQUEST, "")
-        # Passed through unvalidated — provider vocabularies differ.
         self.assertEqual(server.requests[0]["reasoning_effort"], "max")
 
     def test_effort_is_omitted_when_unset(self):
@@ -76,8 +73,11 @@ class AgentTest(AgentTestCase):
         broken = {
             "content": None,
             "tool_calls": [
-                {"id": "call_1", "type": "function",
-                 "function": {"name": "bash", "arguments": "{not json"}}
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{not json"},
+                }
             ],
         }
         server = self.serve([broken, report_turn("FAIL")])
@@ -89,10 +89,12 @@ class AgentTest(AgentTestCase):
         self.assertIn("not valid JSON", result["content"])
 
     def test_unknown_tool_is_reported_to_the_model(self):
-        server = self.serve([
-            {"content": None, "tool_calls": [tool_call("teleport", {}, "call_1")]},
-            report_turn(),
-        ])
+        server = self.serve(
+            [
+                {"content": None, "tool_calls": [tool_call("teleport", {}, "call_1")]},
+                report_turn(),
+            ]
+        )
 
         agent.run(self.config(server), PULL_REQUEST, "")
 
@@ -127,7 +129,6 @@ class WindDownTest(AgentTestCase):
 
         self.assertEqual(status, "PARTIAL")
         self.assertIn("stopped before submitting a report", body)
-        # The fallback carries what it actually tried, not just "it gave up".
         self.assertIn("echo probing-the-server", body)
 
     def test_time_budget_ends_the_run(self):
@@ -143,7 +144,6 @@ class WindDownTest(AgentTestCase):
         with mock.patch("qa_agent.agent.time.monotonic", return_value=1000.0):
             self.assertEqual(agent._timeout(600, config, 1012.0), 12)
             self.assertEqual(agent._timeout(5, config, 1012.0), 5)
-            # Always leaves enough for a command to at least start.
             self.assertEqual(agent._timeout(600, config, 995.0), 10)
         self.assertEqual(agent._timeout(None, make_config(command_timeout=30), None), 30)
 
@@ -166,9 +166,6 @@ class EndpointFailureTest(AgentTestCase):
         self.assertIn("echo setup-worked", body)
 
     def test_a_non_json_body_is_reported_rather_than_raised(self):
-        # A proxy answering 200 with an HTML error page. json.JSONDecodeError is
-        # a ValueError, so it matched no handler and left as a traceback: exit 1,
-        # no comment, empty summary.
         page = "<html><body>502 Bad Gateway at internal.proxy.corp</body></html>"
         server = self.serve([page] * 5)
 
@@ -178,8 +175,6 @@ class EndpointFailureTest(AgentTestCase):
 
         self.assertEqual(status, "PARTIAL")
         self.assertIn("not JSON", body)
-        # The report is a public pull request comment, so the body itself stays
-        # out of it — a proxy page can name internal hosts — and goes to the log.
         self.assertNotIn("internal.proxy.corp", body)
         self.assertIn("internal.proxy.corp", logged.getvalue())
 
@@ -196,16 +191,24 @@ class EndpointFailureTest(AgentTestCase):
 
     def test_an_error_body_is_summarised_in_the_report_and_logged_in_full(self):
         server = self.serve(
-            [(429, {"error": {"code": "1310", "message": "Weekly Limit Exhausted",
-                              "request_id": "req-internal-9f3c"}})]
+            [
+                (
+                    429,
+                    {
+                        "error": {
+                            "code": "1310",
+                            "message": "Weekly Limit Exhausted",
+                            "request_id": "req-internal-9f3c",
+                        }
+                    },
+                )
+            ]
         )
 
         logged = io.StringIO()
         with contextlib.redirect_stdout(logged):
             _, body = agent.run(self.config(server), PULL_REQUEST, "")
 
-        # The provider writes `message` for a developer to read, so it is safe to
-        # publish. The rest of the body is diagnostics, and stays in the log.
         self.assertIn("Weekly Limit Exhausted", body)
         self.assertNotIn("req-internal-9f3c", body)
         self.assertIn("req-internal-9f3c", logged.getvalue())
@@ -219,7 +222,6 @@ class EndpointFailureTest(AgentTestCase):
         self.assertEqual(len(server.requests), 2)
 
     def test_a_rejected_request_is_not_retried_but_is_reported(self):
-        # 1261 is z.ai's "Prompt too long". https://docs.z.ai/api-reference/api-code
         server = self.serve([(400, {"error": {"code": "1261", "message": "Prompt too long"}})])
 
         status, body = agent.run(self.config(server), PULL_REQUEST, "")
@@ -230,8 +232,6 @@ class EndpointFailureTest(AgentTestCase):
         self.assertEqual(len(server.requests), 1)
 
     def test_an_exhausted_quota_is_not_retried(self):
-        # z.ai returns 429 for quota and plan problems as well as rate limits;
-        # only the rate limits are worth retrying. Codes 1308-1321 are quota.
         server = self.serve(
             [(429, {"error": {"code": "1310", "message": "Weekly Limit Exhausted"}})]
         )
@@ -244,8 +244,10 @@ class EndpointFailureTest(AgentTestCase):
 
     def test_a_real_rate_limit_is_retried(self):
         server = self.serve(
-            [(429, {"error": {"code": "1302", "message": "Rate limit reached"}}),
-             report_turn("PASS")]
+            [
+                (429, {"error": {"code": "1302", "message": "Rate limit reached"}}),
+                report_turn("PASS"),
+            ]
         )
 
         status, _ = agent.run(self.config(server), PULL_REQUEST, "")
@@ -258,8 +260,6 @@ class TerminationTest(AgentTestCase):
     """A killed run must still report — this is how PR #3 was lost."""
 
     def test_a_command_that_kills_the_agent_still_produces_a_report(self):
-        # The agent tidying up strays with `pkill -f "python -m qa_agent"` matches
-        # its own process. Verbatim from the run that exited 143 with no comment.
         server = self.serve(
             [
                 bash_turn("echo setup-worked", "call_1"),
@@ -284,9 +284,6 @@ class ProviderBehaviourTest(AgentTestCase):
     """Behaviours the provider documents, which the loop has to honour."""
 
     def test_reasoning_content_is_returned_to_the_provider_unmodified(self):
-        # z.ai's Preserved Thinking is on by default for the coding-plan endpoint
-        # and wants reasoning blocks back "full, unmodified, and correctly
-        # ordered". https://docs.z.ai/guides/capabilities/thinking-mode
         thought = "The endpoint is new, so I should curl it before trusting the diff."
         server = self.serve(
             [
@@ -306,8 +303,6 @@ class ProviderBehaviourTest(AgentTestCase):
         self.assertEqual(echoed[0]["reasoning_content"], thought)
 
     def test_a_context_overflow_is_recognised_and_compacted(self):
-        # The overflow arrives as a 200, not an error.
-        # https://docs.z.ai/api-reference/llm/chat-completion
         server = self.serve(
             [
                 bash_turn("echo one", "call_1"),
@@ -344,8 +339,6 @@ class ProviderBehaviourTest(AgentTestCase):
         self.assertIn("cut off at the output limit", server.last_messages[-1]["content"])
 
     def test_a_truncated_turn_that_still_called_a_tool_is_run_normally(self):
-        # Appending a user message after an assistant turn with unanswered
-        # tool_call ids makes the next request invalid.
         truncated = {
             "content": "Running it",
             "tool_calls": [tool_call("bash", {"command": "echo still-ran"}, "call_1")],
@@ -373,7 +366,6 @@ class ProviderBehaviourTest(AgentTestCase):
         self.assertIn("finish_reason: sensitive", body)
 
     def test_reported_token_usage_drives_compaction(self):
-        # Under the ceiling: nothing is touched, however long the transcript is.
         loud = {
             "content": "x" * 4000,
             "tool_calls": [tool_call("bash", {"command": "echo hi"}, "call_1")],
@@ -416,7 +408,6 @@ class UnexpectedFailureTest(AgentTestCase):
         self.assertEqual(status, "PARTIAL")
         self.assertIn("unexpected failure", body)
         self.assertIn("OSError", body)
-        # Loud where an engineer will look, graceful where the author will.
         self.assertIn("Traceback", logged.getvalue())
 
     def test_the_net_does_not_swallow_a_termination_signal(self):
@@ -424,7 +415,6 @@ class UnexpectedFailureTest(AgentTestCase):
 
         _, body = agent.run(self.config(server), PULL_REQUEST, "")
 
-        # Interrupted is an Exception too: the specific handler has to win.
         self.assertIn("stopped by SIGTERM", body)
         self.assertNotIn("unexpected failure", body)
 
@@ -440,11 +430,8 @@ class CalibrationTest(unittest.TestCase):
 
     def test_the_budget_uses_the_measured_ratio(self):
         config = make_config(context_tokens=10000)
-        # 0.8 * 10000 tokens, at a measured 4 chars per token.
         self.assertEqual(agent._budget(config, 9000, 4.0), 32000)
-        # Comfortably under the ceiling: nothing to do.
         self.assertEqual(agent._budget(config, 100, 4.0), 0)
-        # No window stated: the agent does not guess one.
         self.assertEqual(agent._budget(make_config(context_tokens=0), 99999, 4.0), 0)
 
 
@@ -455,13 +442,10 @@ class ContextTest(AgentTestCase):
             [bash_turn(loud, "call_%d" % i) for i in range(1, 13)] + [report_turn()]
         )
 
-        agent.run(
-            self.config(server, max_turns=20, context_tokens=2000), PULL_REQUEST, "y" * 2000
-        )
+        agent.run(self.config(server, max_turns=20, context_tokens=2000), PULL_REQUEST, "y" * 2000)
 
         final = server.last_messages
         self.assertIn("elided to fit the context window", "".join(m["content"] for m in final))
-        # Every tool call still has its reply, or the provider would reject the request.
         called = [c["id"] for m in final for c in m.get("tool_calls") or []]
         replied = [m["tool_call_id"] for m in final if m["role"] == "tool"]
         self.assertEqual(called, replied)
@@ -486,9 +470,7 @@ class ArtifactsTest(AgentTestCase):
 
     def test_no_artifacts_section_when_nothing_was_saved(self):
         server = self.serve([report_turn("PASS")])
-        _, body = agent.run(
-            self.config(server, artifacts_dir=tempfile.mkdtemp()), PULL_REQUEST, ""
-        )
+        _, body = agent.run(self.config(server, artifacts_dir=tempfile.mkdtemp()), PULL_REQUEST, "")
         self.assertNotIn("### Artifacts", body)
 
 

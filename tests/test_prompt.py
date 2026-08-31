@@ -29,7 +29,6 @@ class InitialMessageTest(unittest.TestCase):
 
     def test_gives_the_shas_needed_for_a_before_and_after(self):
         message = self.message()
-        # Branch names are not enough: HEAD is detached at the PR commit.
         self.assertIn("git checkout base1234", message)
         self.assertIn("git checkout head5678", message)
         self.assertIn("git fetch --no-tags origin main", message)

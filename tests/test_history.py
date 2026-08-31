@@ -36,9 +36,11 @@ def conversation(turns, output_chars=1000):
 class SizeTest(unittest.TestCase):
     def test_counts_content_and_tool_call_arguments(self):
         messages = [
-            {"role": "assistant", "content": "abc", "tool_calls": [
-                {"function": {"name": "bash", "arguments": '{"command": "ls"}'}}
-            ]},
+            {
+                "role": "assistant",
+                "content": "abc",
+                "tool_calls": [{"function": {"name": "bash", "arguments": '{"command": "ls"}'}}],
+            },
         ]
         self.assertEqual(history.size(messages), 3 + 4 + len('{"command": "ls"}'))
 
@@ -72,7 +74,6 @@ class CompactTest(unittest.TestCase):
         self.assertEqual(len(compacted), len(messages))
         called = [c["id"] for m in compacted for c in m.get("tool_calls") or []]
         replied = [m["tool_call_id"] for m in compacted if m["role"] == "tool"]
-        # Every tool call keeps its reply, or the next request is rejected.
         self.assertEqual(called, replied)
 
     def test_recent_turns_are_preserved_while_the_budget_allows(self):
@@ -84,9 +85,6 @@ class CompactTest(unittest.TestCase):
             self.assertEqual(original["content"], kept["content"])
 
     def test_an_oversized_result_in_the_last_exchange_is_truncated(self):
-        # One command produced more output than the whole budget. The last
-        # exchange is protected from eliding, so without truncation nothing gives
-        # and the next request fails on a window it can never fit.
         messages = conversation(1, output_chars=30000)
 
         compacted = history.compact(messages, 5000)
@@ -95,7 +93,6 @@ class CompactTest(unittest.TestCase):
         self.assertEqual(len(compacted), len(messages))
         result = compacted[-1]["content"]
         self.assertIn("truncated to fit the context window", result)
-        # The head survives, so the model can still read how the command started.
         self.assertTrue(messages[-1]["content"].startswith(result.split("\n[...")[0]))
         self.assertGreaterEqual(len(result.split("\n[...")[0]), history.MIN_TOOL_CHARS)
 
@@ -114,7 +111,6 @@ class CompactTest(unittest.TestCase):
 
         compacted = history.compact(messages, 5000)
 
-        # Reasoning is dropped whole or kept verbatim — never rewritten.
         kept = compacted[2].get("reasoning_content")
         self.assertTrue(kept is None or kept == messages[2]["reasoning_content"])
 
@@ -143,8 +139,6 @@ class CompactTest(unittest.TestCase):
         self.assertTrue(any(m["role"] == "assistant" for m in elided))
 
     def test_best_effort_when_nothing_more_can_be_shrunk(self):
-        # An enormous diff cannot be compacted away; the caller still gets a
-        # usable transcript rather than an exception.
         messages = [{"role": "user", "content": "d" * 5000}]
         self.assertEqual(history.compact(messages, 100), messages)
 

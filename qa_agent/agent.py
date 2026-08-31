@@ -7,20 +7,11 @@ import traceback
 
 from . import history, llm, prompt, tools
 
-# Model turns allowed after the agent is told to wrap up, so it can turn what it
-# already has into a report instead of being cut off mid-run.
 GRACE_TURNS = 2
-# How much of the command trail to quote when the agent never reported itself.
 TRAIL_LIMIT = 20
 
-# Characters per token, used only to turn a token budget into the character
-# budget compaction works in. Deliberately pessimistic: over-compacting costs
-# some context, under-compacting costs the whole request.
 CHARS_PER_TOKEN = 3
 
-# Signals that mean "stop now": the runner sends SIGTERM before it kills a job
-# that has run out of time, and an agent poking at process management can signal
-# itself by accident.
 TERMINATION_SIGNALS = {"SIGTERM": None, "SIGINT": None}
 
 
@@ -34,12 +25,7 @@ def log(message):
 
 
 def run(config, pull_request, diff):
-    """Drive the agent until it submits a report or runs out of budget.
-
-    Always returns (status, markdown_body): a run that fails, stalls, times out
-    or is killed still produces a report, because a pull request with no QA
-    comment and a red check tells the author nothing.
-    """
+    """Drive the agent until it submits a report or runs out of budget."""
     trail = []
     restore = _trap_termination()
     try:
@@ -48,13 +34,10 @@ def run(config, pull_request, diff):
         log(str(error))
         return _fallback(config, str(error), trail)
     except Exception as error:
-        # The net. Fixing each escape as it is discovered leaves the next one
-        # undiscovered, and every one of them costs the reviewer their report.
-        # The traceback goes to the job log, where it is loud; the report says
-        # what happened without pretending the run succeeded.
         log(traceback.format_exc())
         return _fallback(
-            config, "an unexpected failure ended the run: %s: %s" % (type(error).__name__, error),
+            config,
+            "an unexpected failure ended the run: %s: %s" % (type(error).__name__, error),
             trail,
         )
     finally:
@@ -62,10 +45,7 @@ def run(config, pull_request, diff):
 
 
 def _trap_termination():
-    """Turn a termination signal into a report instead of a dead job.
-
-    Returns a callable that puts the previous handlers back.
-    """
+    """Trap termination signals; returns a callable that restores the handlers."""
 
     def handle(number, _frame):
         raise Interrupted(
@@ -81,7 +61,6 @@ def _trap_termination():
         try:
             previous[number] = signal.signal(number, handle)
         except (ValueError, OSError):
-            # Not the main thread, or the platform does not allow it.
             continue
 
     def restore():
@@ -134,9 +113,6 @@ def _loop(config, pull_request, diff, trail):
         try:
             completion = llm.complete(config, messages, tool_definitions, deadline=deadline)
         except llm.LLMError as error:
-            # The endpoint is gone or the request is unacceptable. Retrying is
-            # llm.complete's job and it already did; report what we have. The
-            # raw body stays in the log — the report is a public comment.
             log("model endpoint failed: %s" % error)
             if error.detail:
                 log(error.detail)
@@ -147,15 +123,13 @@ def _loop(config, pull_request, diff, trail):
         prompt_tokens = completion.prompt_tokens or prompt_tokens
         message = completion.message
 
-        # A context overflow arrives as a successful response, not an error. Left
-        # unhandled it looks like a turn that simply called no tools, and the loop
-        # would nudge the model until the budget ran out.
         if completion.overflowed:
             log("[turn %d] the model reports the context window was exceeded" % turn)
             if overflows >= 1:
                 return _fallback(
-                    config, "the context window was exceeded and compacting did not "
-                    "recover it", trail
+                    config,
+                    "the context window was exceeded and compacting did not " "recover it",
+                    trail,
                 )
             overflows += 1
             messages = history.compact(messages, _shrink(messages))
@@ -164,8 +138,7 @@ def _loop(config, pull_request, diff, trail):
         if completion.blocked:
             return _fallback(
                 config,
-                "the provider stopped the response (finish_reason: %s)"
-                % completion.finish_reason,
+                "the provider stopped the response (finish_reason: %s)" % completion.finish_reason,
                 trail,
             )
 
@@ -179,11 +152,6 @@ def _loop(config, pull_request, diff, trail):
 
         calls = message.get("tool_calls")
         if not calls:
-            # Nothing to run. A truncated turn was cut off before it got to its
-            # tool call, which is worth naming; otherwise the model has simply
-            # stopped, and a nudge beats ending with no verdict. Either way the
-            # reply must come after the tool results, never instead of them —
-            # an assistant turn with unanswered tool_call ids is rejected.
             messages.append({"role": "user", "content": _nudge(completion)})
             continue
 
@@ -225,26 +193,14 @@ def _nudge(completion):
 
 
 def _calibrate(sent_chars, prompt_tokens):
-    """Chars per token, measured from a request the provider has counted for us.
-
-    Better than a constant: the ratio depends on the language, the code, and the
-    tokenizer, and guessing low means compacting earlier than necessary. Clamped
-    so one odd reading cannot make the budget absurd.
-    """
+    """Chars per token, measured from a request the provider has counted."""
     if sent_chars <= 0 or prompt_tokens <= 0:
         return CHARS_PER_TOKEN
     return min(8.0, max(1.5, sent_chars / float(prompt_tokens)))
 
 
 def _budget(config, prompt_tokens, chars_per_token=CHARS_PER_TOKEN):
-    """The character budget for compaction, or 0 while there is no reason to.
-
-    The provider reports how many prompt tokens the last request actually used,
-    so the only guess left is the model's window — and that is stated by the
-    `context_tokens` input rather than assumed. Without it the agent does not
-    compact speculatively; it waits for the provider to say the window was
-    exceeded, and compacts then.
-    """
+    """The character budget for compaction, or 0 when there is no reason to."""
     if config.context_tokens <= 0:
         return 0
     ceiling = int(config.context_tokens * config.context_headroom)
@@ -273,7 +229,6 @@ def _timeout(requested, config, deadline):
     if deadline is not None:
         remaining = int(deadline - time.monotonic())
         if remaining < timeout:
-            # A floor, so the last command still gets a chance to say something.
             timeout = max(10, remaining)
     return timeout
 

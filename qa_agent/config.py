@@ -3,16 +3,6 @@
 import os
 from dataclasses import dataclass, field
 
-# Every provider below speaks the OpenAI-compatible `/chat/completions` API.
-# `base_url` is the prefix the endpoint is appended to.
-#
-# Only base URLs live here. Model ids are deliberately absent: they change faster
-# than this action does, and a stale default silently pins every consumer to an
-# old model. The model comes from configuration, alongside the key.
-#
-#   zai     https://docs.z.ai/devpack/quick-start ("OpenAI Chat Completions")
-#   gemini  https://ai.google.dev/gemini-api/docs/openai
-#   openai  https://platform.openai.com/docs/api-reference/chat
 PROVIDERS = {
     "zai": "https://api.z.ai/api/coding/paas/v4",
     "openai": "https://api.openai.com/v1",
@@ -43,12 +33,7 @@ class Config:
     effort: str
     request_timeout: int = 600
     time_budget: int = 1500
-    # The model's context window, in tokens. Zero means "not stated": the agent
-    # then compacts only when the provider says the window was exceeded, rather
-    # than guessing a limit for a model it knows nothing about.
     context_tokens: int = 0
-    # Fraction of that window at which compaction starts, leaving room for the
-    # turn being requested.
     context_headroom: float = 0.8
     artifacts_dir: str = ""
     run_url: str = ""
@@ -82,11 +67,7 @@ def _resolve_endpoint(provider, base_url):
 
 
 def parse_fail_on(raw):
-    """Which verdicts should turn the check red.
-
-    `none` keeps the job green whatever the verdict, which is how you roll the
-    action out to a repository before you trust it to gate merges.
-    """
+    """Which verdicts should turn the check red."""
     cleaned = (raw or "").strip().lower()
     if cleaned in ("", "none", "never"):
         return ()
@@ -95,8 +76,7 @@ def parse_fail_on(raw):
         status = part.upper()
         if status not in VALID_STATUSES:
             raise ConfigError(
-                "fail_on must list %s, or be 'none' — got %r"
-                % (", ".join(VALID_STATUSES), part)
+                "fail_on must list %s, or be 'none' — got %r" % (", ".join(VALID_STATUSES), part)
             )
         statuses.append(status)
     return tuple(statuses)

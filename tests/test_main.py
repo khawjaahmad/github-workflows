@@ -88,7 +88,6 @@ class MainTest(unittest.TestCase):
         ):
             code = self.run_with("PASS")
 
-        # The verdict still stands, and the report is still readable.
         self.assertEqual(code, 0)
         self.assertIn("**Status: PASS**", self.read("summary"))
 
@@ -97,9 +96,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(entry.main(), 2)
 
     def test_an_unreadable_pull_request_exits_two(self):
-        with mock.patch.object(
-            github, "get_pull_request", side_effect=github.GitHubError("404")
-        ):
+        with mock.patch.object(github, "get_pull_request", side_effect=github.GitHubError("404")):
             self.assertEqual(entry.main(), 2)
 
     def test_the_artifacts_directory_is_created_for_the_agent(self):
@@ -112,18 +109,25 @@ class MainTest(unittest.TestCase):
 class DiffBudgetTest(unittest.TestCase):
     def config(self, context_tokens):
         return config_module.Config(
-            api_key="k", base_url="u", model="m", provider="zai", github_token="t",
-            repo="a/b", pr_number=1, workspace=".", max_turns=1, command_timeout=1,
-            post_comment=False, setup_command="", effort="",
+            api_key="k",
+            base_url="u",
+            model="m",
+            provider="zai",
+            github_token="t",
+            repo="a/b",
+            pr_number=1,
+            workspace=".",
+            max_turns=1,
+            command_timeout=1,
+            post_comment=False,
+            setup_command="",
+            effort="",
             context_tokens=context_tokens,
         )
 
     def test_the_diff_never_takes_the_whole_context(self):
-        # Unknown window: a flat cap, as before.
         self.assertEqual(entry._diff_budget(self.config(0)), 120000)
-        # A small window keeps the diff to a floor it can still work with.
         self.assertEqual(entry._diff_budget(self.config(20000)), 20000)
-        # A large one is capped, so the diff never crowds out the run.
         self.assertEqual(entry._diff_budget(self.config(1000000)), 120000)
 
 

@@ -9,11 +9,6 @@ import tempfile
 MAX_OUTPUT_CHARS = 20000
 VALID_STATUSES = ("PASS", "FAIL", "PARTIAL")
 
-# The agent's instructions come partly from the pull request itself, so the
-# commands it runs are only as trustworthy as the branch under test. Nothing the
-# action introduces — and none of the runner's privileged tokens — is exposed to
-# them. Repository-supplied variables are left alone: a project may legitimately
-# need them to boot.
 SECRET_PREFIXES = ("QA_", "INPUT_")
 SECRET_NAMES = frozenset(
     {
@@ -22,26 +17,14 @@ SECRET_NAMES = frozenset(
         "ACTIONS_RUNTIME_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_URL",
-        # The runner's env files are commands the workflow executes later, not
-        # data. A line appended to GITHUB_ENV or GITHUB_PATH is applied to every
-        # subsequent step in the calling job, so leaving them writable would let
-        # the branch under test set variables — or prepend a directory to PATH —
-        # for steps that run after QA. GITHUB_OUTPUT would let it dictate the
-        # verdict, and GITHUB_STEP_SUMMARY the report the reviewer reads. The
-        # agent has its own routes to all four; its commands need none of them.
-        # Unsetting rather than redirecting is deliberate: tools that write
-        # annotations check whether these are set and skip when they are not.
         "GITHUB_ENV",
         "GITHUB_PATH",
         "GITHUB_OUTPUT",
         "GITHUB_STEP_SUMMARY",
     }
 )
-# Scrubbed with everything else, then handed back: the agent needs somewhere to
-# put screenshots and it carries no secret.
 PASS_THROUGH = ("QA_ARTIFACTS_DIR",)
 
-# Time a killed process group gets to exit before it is killed outright.
 GRACE_SECONDS = 3
 
 
@@ -135,8 +118,6 @@ def child_environment(environ=None):
 
 
 def run_bash(command, workspace, timeout, environ=None):
-    # Collect output in a temp file rather than a pipe: a backgrounded server inherits
-    # the child's stdout, and draining a pipe to EOF would block until that server exits.
     with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as sink:
         process = subprocess.Popen(
             ["bash", "-c", command],
@@ -145,9 +126,6 @@ def run_bash(command, workspace, timeout, environ=None):
             stdout=sink,
             stderr=subprocess.STDOUT,
             env=child_environment(environ),
-            # Its own process group, so a command that hangs can be cleaned up
-            # along with everything it spawned instead of leaving the runner with
-            # orphans holding ports open.
             start_new_session=os.name == "posix",
         )
         try:
@@ -211,11 +189,7 @@ def render_report(arguments, footer=""):
 
 
 def render_artifacts(artifacts_dir, run_url):
-    """List whatever the agent saved, so screenshots reach the reviewer.
-
-    A PR comment cannot carry an image the agent produced, so the files are
-    uploaded as a workflow artifact and the report points at them.
-    """
+    """List whatever the agent saved, so screenshots reach the reviewer."""
     names = collect_artifacts(artifacts_dir)
     if not names:
         return ""

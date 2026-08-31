@@ -1,8 +1,4 @@
-"""The whole action, from environment variables to a posted comment.
-
-Everything but the two HTTP services is real: config resolution, the agent loop,
-the bash tool, report rendering and the comment upsert.
-"""
+"""The whole action, from environment variables to a posted comment."""
 
 import os
 import sys
@@ -96,7 +92,6 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("curl localhost:8080/health", posted)
         self.assertEqual(self.read("output").strip(), "status=PASS")
 
-        # The agent was told what stack it is in, and got the real command output back.
         self.assertIn("go.mod (Go)", llm.requests[0]["messages"][1]["content"])
         result = [m for m in llm.requests[1]["messages"] if m["role"] == "tool"][0]
         self.assertIn("module example.com/widget", result["content"])
@@ -151,7 +146,7 @@ class EndToEndTest(unittest.TestCase):
         with mock.patch("qa_agent.llm.time.sleep"):
             code = entry.main()
 
-        self.assertEqual(code, 0)  # PARTIAL does not fail the check by default
+        self.assertEqual(code, 0)
         self.assertIn("**Status: PARTIAL**", api.comments[0]["body"])
         self.assertIn("model endpoint failed", api.comments[0]["body"])
 

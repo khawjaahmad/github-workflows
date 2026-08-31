@@ -29,9 +29,7 @@ class FromEnvTest(unittest.TestCase):
         os.environ.update(self.original)
 
     def test_provider_selects_the_base_url(self):
-        self.assertEqual(
-            config_module.from_env().base_url, "https://api.z.ai/api/coding/paas/v4"
-        )
+        self.assertEqual(config_module.from_env().base_url, "https://api.z.ai/api/coding/paas/v4")
 
         os.environ["QA_PROVIDER"] = "gemini"
         self.assertEqual(
@@ -40,8 +38,6 @@ class FromEnvTest(unittest.TestCase):
         )
 
     def test_the_model_always_comes_from_configuration(self):
-        # No provider ships a default model id: they go stale faster than this
-        # action does, and a stale default silently pins every consumer.
         os.environ["QA_MODEL"] = ""
         with self.assertRaises(config_module.ConfigError) as raised:
             config_module.from_env()
@@ -96,7 +92,6 @@ class FailOnTest(unittest.TestCase):
         self.assertEqual(config_module.parse_fail_on("fail, partial"), ("FAIL", "PARTIAL"))
 
     def test_advisory_mode(self):
-        # How the action is rolled out before it is trusted to gate merges.
         self.assertEqual(config_module.parse_fail_on("none"), ())
         self.assertEqual(config_module.parse_fail_on(""), ())
 

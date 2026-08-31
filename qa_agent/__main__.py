@@ -33,7 +33,6 @@ def main():
             api_root=config.github_api_url,
         )
     except github.GitHubError as error:
-        # Without the PR there is nothing to QA and nowhere to report it.
         print("could not read the pull request: %s" % error, file=sys.stderr)
         return 2
 
@@ -67,9 +66,6 @@ def _publish(config, status, body):
             )
             agent.log("posted the QA report to %s#%d" % (config.repo, config.pr_number))
         except github.GitHubError as error:
-            # The report itself is still valid, and it is in the log and the job
-            # summary. Surface the failure loudly rather than discarding a
-            # finished QA run over a permissions problem.
             print(
                 "::error title=QA report could not be posted::%s "
                 "(does the job grant `pull-requests: write`?)" % error,

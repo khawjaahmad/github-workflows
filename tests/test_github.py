@@ -42,7 +42,6 @@ class ReportCommentTest(unittest.TestCase):
         self.assertIn("PATCH", [method for method, _, _ in server.calls])
 
     def test_finds_a_report_beyond_the_first_page(self):
-        # A busy pull request: missing the marker would stack a second report.
         comments = [{"id": index, "body": "chatter"} for index in range(250)]
         comments[240] = {"id": 240, "body": github.REPORT_MARKER + "\nold report"}
         server = self.serve(comments)
@@ -77,9 +76,7 @@ class DiffTest(unittest.TestCase):
 
     def test_a_short_diff_is_passed_through(self):
         with mock.patch.object(github, "_call", return_value="diff --git a/a b/a"):
-            self.assertEqual(
-                github.get_diff("token", "acme/widget", 7), "diff --git a/a b/a"
-            )
+            self.assertEqual(github.get_diff("token", "acme/widget", 7), "diff --git a/a b/a")
 
 
 if __name__ == "__main__":

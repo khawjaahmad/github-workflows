@@ -4,9 +4,7 @@ import json
 import urllib.error
 import urllib.request
 
-# github.com by default; GitHub Enterprise Server serves the same API elsewhere.
 API_ROOT = "https://api.github.com"
-# Lets a re-run replace its previous report instead of stacking comments.
 REPORT_MARKER = "<!-- qa-changes-report -->"
 PER_PAGE = 100
 MAX_PAGES = 20
@@ -59,11 +57,7 @@ def get_diff(token, repo, number, max_chars=120000, api_root=None):
 
 
 def find_report(token, repo, number, api_root=None):
-    """The id of this agent's existing report comment, if it posted one.
-
-    Paginated: on a busy pull request the report is not on the first page, and
-    missing it would mean posting a second report instead of updating the first.
-    """
+    """The id of this agent's existing report comment, if it posted one."""
     for page in range(1, MAX_PAGES + 1):
         comments = _call(
             token,

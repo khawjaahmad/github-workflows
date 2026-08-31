@@ -1,5 +1,4 @@
-"""The client's request budgeting and its split between what is published and
-what is only logged."""
+"""The client's request budgeting, and what it publishes versus logs."""
 
 import os
 import sys
@@ -46,7 +45,6 @@ class AttemptTimeoutTest(unittest.TestCase):
 class BackoffTest(unittest.TestCase):
     def test_the_servers_own_advice_wins(self):
         self.assertEqual(llm._backoff(3, "3"), 3.0)
-        # "wait none" is a valid instruction, not a missing header.
         self.assertEqual(llm._backoff(3, "0"), 0.0)
 
     def test_a_nonsense_header_falls_back_to_jittered_backoff(self):
@@ -72,8 +70,9 @@ class DisclosureTest(unittest.TestCase):
         self.assertIn("gw.internal", error.detail)
 
     def test_an_unstructured_body_is_not_published_at_all(self):
-        error = llm._http_error(make_config(), "https://gw.internal/v1", 502,
-                                "<html>proxy.corp says no</html>")
+        error = llm._http_error(
+            make_config(), "https://gw.internal/v1", 502, "<html>proxy.corp says no</html>"
+        )
 
         self.assertNotIn("proxy.corp", str(error))
         self.assertIn("HTTP 502", str(error))
@@ -86,8 +85,7 @@ class DisclosureTest(unittest.TestCase):
 
 
 class RetryDeadlineTest(unittest.TestCase):
-    """Five attempts at the default 600s timeout is fifty minutes; the job is
-    thirty. Retries have to answer to the run's budget."""
+    """Retries have to answer to the run's time budget."""
 
     def serve(self, turns):
         server = LLMServer(turns).start()
@@ -112,7 +110,6 @@ class RetryDeadlineTest(unittest.TestCase):
         with self.assertRaises(llm.LLMError):
             llm.complete(config, [], [], deadline=time.monotonic() - 1)
 
-        # One attempt, not five: the wind-down still needs the time that is left.
         self.assertEqual(len(server.requests), 1)
 
     def test_a_spent_budget_does_not_stop_a_request_that_works(self):

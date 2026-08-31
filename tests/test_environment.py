@@ -34,7 +34,6 @@ class ProbeTest(unittest.TestCase):
         self.write("main.zig")
         report = environment.probe(self.workspace)
         self.assertIn("none found", report)
-        # The listing still gives the agent somewhere to start.
         self.assertIn("main.zig", report)
 
     def test_lists_the_tooling_actually_installed(self):

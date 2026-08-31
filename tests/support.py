@@ -91,11 +91,7 @@ class _Server(HTTPServer):
 
 
 class LLMServer(_Server):
-    """Replays scripted assistant turns and records what the agent sent.
-
-    A turn may be a message dict, or an int status code to simulate a provider
-    error on that turn.
-    """
+    """Replays scripted turns; an int turn simulates that status code."""
 
     def __init__(self, turns=()):
         super().__init__(("127.0.0.1", 0), _Handler)
@@ -109,15 +105,12 @@ class LLMServer(_Server):
             self.reply(handler, turn, {"error": {"message": "stub failure"}})
             return
         if isinstance(turn, str):
-            # A gateway answering for the API: 200, but not JSON.
             self.reply_raw(handler, 200, turn, content_type="text/html")
             return
         if isinstance(turn, tuple):
             status, payload = turn
             self.reply(handler, status, payload)
             return
-        # A turn is either a bare assistant message, or a wrapper carrying the
-        # finish_reason and usage the real API returns alongside it.
         if "message" in turn:
             payload = {
                 "choices": [

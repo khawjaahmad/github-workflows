@@ -123,7 +123,8 @@ def _git_section(base, head):
             "",
             "HEAD is detached at the PR commit. To compare against the base and return:",
             "",
-            "    git checkout %s      # base, fetch first if it is missing:" % (base_sha or "<base sha>"),
+            "    git checkout %s      # base, fetch first if it is missing:"
+            % (base_sha or "<base sha>"),
             "    #   git fetch --no-tags origin %s" % (base.get("ref") or "<base ref>"),
             "    git checkout %s      # back to the PR commit" % head_sha,
             "",

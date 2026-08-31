@@ -1,7 +1,5 @@
 name: QA Changes
-description: >-
-  Validate a pull request by actually running the software — sets up the repo,
-  exercises the changed behaviour, and posts a QA report as a PR comment.
+description: Validate a pull request by running the software and post a QA report as a comment.
 author: khawjaahmad
 
 inputs:
@@ -9,23 +7,14 @@ inputs:
     description: API key for the LLM provider (store it as the LLM_API_KEY secret).
     required: true
   provider:
-    description: >-
-      Which OpenAI-compatible endpoint to use: zai (z.ai coding plan), openai,
-      gemini, or custom. Selects the base URL; with `custom` you must set
-      `base_url` yourself.
+    description: OpenAI-compatible endpoint — zai, openai, gemini or custom. Selects the base URL.
     required: false
     default: zai
   model:
-    description: >-
-      Model id — required. This action ships no default: model ids change faster
-      than the action does, and a default here would quietly pin you to a
-      superseded model. Store it alongside the key (an LLM_MODEL secret or
-      variable) so both move together.
+    description: Model id. No default is shipped — supply it from a secret or variable.
     required: true
   base_url:
-    description: >-
-      Override the OpenAI-compatible base URL that `/chat/completions` is
-      appended to. Required when provider is `custom`.
+    description: OpenAI-compatible base URL. Required when provider is `custom`.
     required: false
     default: ""
   github_token:
@@ -37,17 +26,11 @@ inputs:
     required: false
     default: ""
   github_api_url:
-    description: >-
-      GitHub REST API root. Defaults to the host the workflow is running on, so
-      GitHub Enterprise Server works without any extra configuration.
+    description: GitHub REST API root. Defaults to the current host, so Enterprise Server works.
     required: false
     default: ${{ github.api_url }}
   effort:
-    description: >-
-      Reasoning effort, sent as `reasoning_effort` and passed through verbatim
-      without validation, because the accepted levels differ by provider and
-      change with each model release. Check your provider's documentation for
-      the levels your model takes. Leave empty to use the model's own default.
+    description: Reasoning effort, sent as `reasoning_effort` verbatim. Empty uses the model default.
     required: false
     default: ""
   setup_command:
@@ -59,10 +42,7 @@ inputs:
     required: false
     default: "40"
   time_budget:
-    description: >-
-      Wall-clock seconds before the agent is told to wrap up and report. Keep it
-      comfortably under the job's `timeout-minutes`, or the job is killed before
-      a report exists. Set to 0 to rely on `max_turns` alone.
+    description: Wall-clock seconds before the agent wraps up. Keep under `timeout-minutes`. 0 disables.
     required: false
     default: "1500"
   command_timeout:
@@ -74,11 +54,7 @@ inputs:
     required: false
     default: "600"
   context_tokens:
-    description: >-
-      The model's context window in tokens. Set it and the agent compacts the
-      transcript before it gets close, using the prompt token count the provider
-      reports. Left at 0 it does not guess: it compacts only when a response
-      comes back saying the window was exceeded.
+    description: The model's context window in tokens. 0 compacts only on a reported overflow.
     required: false
     default: "0"
   post_comment:
@@ -86,14 +62,11 @@ inputs:
     required: false
     default: "true"
   fail_on:
-    description: >-
-      Which verdicts fail the check: a list such as `FAIL` or `FAIL,PARTIAL`, or
-      `none` to always stay green while you are trying the action out.
+    description: Verdicts that fail the check — `FAIL`, `FAIL,PARTIAL`, or `none`.
     required: false
     default: FAIL
   upload_artifacts:
-    description: >-
-      Upload whatever the agent saved (screenshots, logs) as a workflow artifact.
+    description: Upload whatever the agent saved as a workflow artifact.
     required: false
     default: "true"
   artifact_retention_days:
@@ -146,9 +119,6 @@ runs:
         QA_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: python -m qa_agent
 
-    # Screenshots and logs cannot be embedded in a PR comment, so they travel
-    # with the run instead; the report lists them by name. `always()` because the
-    # evidence matters most when the verdict was FAIL.
     - name: Upload QA artifacts
       if: always() && inputs.upload_artifacts == 'true'
       uses: actions/upload-artifact@v4

@@ -30,8 +30,6 @@ class ChildEnvironmentTest(unittest.TestCase):
         self.assertEqual(safe, {})
 
     def test_the_runner_env_files_are_removed(self):
-        # A line appended to GITHUB_ENV or GITHUB_PATH is applied to every step
-        # that runs after QA, so the branch under test must not be handed them.
         safe = tools.child_environment(
             {
                 "GITHUB_ENV": "/runner/env",
@@ -56,7 +54,6 @@ class ChildEnvironmentTest(unittest.TestCase):
             {"PATH": "/usr/bin", "DATABASE_URL": "postgres://x", "GITHUB_REPOSITORY": "acme/widget"}
         )
         self.assertEqual(safe["PATH"], "/usr/bin")
-        # A project may genuinely need its own variables to boot.
         self.assertEqual(safe["DATABASE_URL"], "postgres://x")
         self.assertEqual(safe["GITHUB_REPOSITORY"], "acme/widget")
 
@@ -79,8 +76,6 @@ class RunBashTest(unittest.TestCase):
         self.workspace = tempfile.mkdtemp()
 
     def test_backgrounded_process_does_not_block(self):
-        # A dev server started with & keeps the child's stdout open; the tool must still
-        # return as soon as the shell exits.
         started = time.monotonic()
         result = tools.run_bash("sleep 30 & echo server-started", self.workspace, timeout=20)
         self.assertLess(time.monotonic() - started, 10)
@@ -100,7 +95,6 @@ class RunBashTest(unittest.TestCase):
             orphan = int(handle.read().strip())
         time.sleep(0.5)
         with self.assertRaises(OSError):
-            # Signal 0 only checks existence: nothing is left holding a port open.
             os.kill(orphan, 0)
 
     def test_a_fast_command_after_a_timeout_is_not_itself_reported_as_timed_out(self):
@@ -116,9 +110,7 @@ class RunBashTest(unittest.TestCase):
         self.assertIn("exit code: 3", tools.run_bash("exit 3", self.workspace, timeout=10))
 
     def test_long_output_is_truncated_from_the_middle(self):
-        result = tools.run_bash(
-            "python3 -c \"print('a' * 40000)\"", self.workspace, timeout=30
-        )
+        result = tools.run_bash("python3 -c \"print('a' * 40000)\"", self.workspace, timeout=30)
         self.assertIn("chars truncated", result)
         self.assertLess(len(result), tools.MAX_OUTPUT_CHARS + 500)
 
@@ -145,8 +137,13 @@ class ReportTest(unittest.TestCase):
         headings = [line for line in body.splitlines() if line.startswith("###")]
         self.assertEqual(
             headings,
-            ["### Changes Tested", "### Evidence", "### Edge Cases", "### Not Tested",
-             "### Artifacts"],
+            [
+                "### Changes Tested",
+                "### Evidence",
+                "### Edge Cases",
+                "### Not Tested",
+                "### Artifacts",
+            ],
         )
 
     def test_parse_arguments(self):
