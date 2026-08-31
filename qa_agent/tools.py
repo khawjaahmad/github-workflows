@@ -22,6 +22,19 @@ SECRET_NAMES = frozenset(
         "ACTIONS_RUNTIME_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_URL",
+        # The runner's env files are commands the workflow executes later, not
+        # data. A line appended to GITHUB_ENV or GITHUB_PATH is applied to every
+        # subsequent step in the calling job, so leaving them writable would let
+        # the branch under test set variables — or prepend a directory to PATH —
+        # for steps that run after QA. GITHUB_OUTPUT would let it dictate the
+        # verdict, and GITHUB_STEP_SUMMARY the report the reviewer reads. The
+        # agent has its own routes to all four; its commands need none of them.
+        # Unsetting rather than redirecting is deliberate: tools that write
+        # annotations check whether these are set and skip when they are not.
+        "GITHUB_ENV",
+        "GITHUB_PATH",
+        "GITHUB_OUTPUT",
+        "GITHUB_STEP_SUMMARY",
     }
 )
 # Scrubbed with everything else, then handed back: the agent needs somewhere to

@@ -29,6 +29,28 @@ class ChildEnvironmentTest(unittest.TestCase):
         )
         self.assertEqual(safe, {})
 
+    def test_the_runner_env_files_are_removed(self):
+        # A line appended to GITHUB_ENV or GITHUB_PATH is applied to every step
+        # that runs after QA, so the branch under test must not be handed them.
+        safe = tools.child_environment(
+            {
+                "GITHUB_ENV": "/runner/env",
+                "GITHUB_PATH": "/runner/path",
+                "GITHUB_OUTPUT": "/runner/output",
+                "GITHUB_STEP_SUMMARY": "/runner/summary",
+            }
+        )
+        self.assertEqual(safe, {})
+
+    def test_a_command_cannot_write_the_runner_env_file(self):
+        os.environ["GITHUB_ENV"] = "/runner/env"
+        self.addCleanup(os.environ.pop, "GITHUB_ENV", None)
+
+        result = tools.run_bash("echo [$GITHUB_ENV]", tempfile.mkdtemp(), timeout=20)
+
+        self.assertIn("[]", result)
+        self.assertNotIn("/runner/env", result)
+
     def test_the_repository_environment_is_left_alone(self):
         safe = tools.child_environment(
             {"PATH": "/usr/bin", "DATABASE_URL": "postgres://x", "GITHUB_REPOSITORY": "acme/widget"}
