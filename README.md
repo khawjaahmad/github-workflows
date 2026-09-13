@@ -13,11 +13,26 @@ repository.
 | ---- | ---- | --------- | ---- |
 | **QA Changes** | Composite action | `khawjaahmad/github-workflows@v1` | [Reference](docs/qa-changes.md) · [Rollout guide](USAGE.md) |
 | **QA Changes** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/qa.yml@v1` | [Rollout guide](USAGE.md) |
+| **Smoke** | Composite action | `khawjaahmad/github-workflows/smoke@v1` | [Reference](docs/smoke.md) |
+| **Smoke** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/smoke.yml@v1` | [Reference](docs/smoke.md) |
+| **Build** | Composite action | `khawjaahmad/github-workflows/build@v1` | [Reference](docs/build.md) |
+| **Build** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/build.yml@v1` | [Reference](docs/build.md) |
+| **PR Gate** | Composite action | `khawjaahmad/github-workflows/pr-gate@v1` | [Reference](docs/pr-gate.md) |
+| **PR Gate** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/pr-gate.yml@v1` | [Reference](docs/pr-gate.md) |
+| **Diff Scope** | Composite action | `khawjaahmad/github-workflows/diff-scope@v1` | [Reference](docs/diff-scope.md) |
 
 **QA Changes** validates a pull request by *running the software* rather than reading the
 diff. It sets up the repository, exercises the changed behaviour as a real user would — CLI,
 HTTP, browser — and posts a structured report with evidence and a verdict of PASS, FAIL or
 PARTIAL. It is not a code reviewer and not a test runner; those jobs already have owners.
+
+The other four are deterministic and need no model or secret. **Smoke** starts the software
+and checks its routes and commands, and is the check to run before the agent. **Build**
+detects how the repository builds and proves the pull request still does. **PR Gate** checks
+diff size, touched paths, new TODOs, secrets, workflow lint and dependency changes, and
+labels agent-authored pull requests. **Diff Scope** tells other jobs which parts of the
+repository changed and how much of the added code is covered. All of them run on
+`merge_group` as well as `pull_request`, so a merge queue re-verifies the merged result.
 
 ## Using any of this
 
@@ -57,6 +72,12 @@ whatever gets added later.
 - **Pin to `@v1`.** The tag moves with each compatible release, so you get fixes without
   tracking an unreviewed `main`. Pin to an exact tag such as `@v1.0.0` if you would rather
   review every bump yourself.
+- **Everything this repository pulls in is pinned by commit SHA** with the version in a
+  comment, and Dependabot keeps both current. A shared workflows repository is a supply-chain
+  target; the March 2025 retagging of `tj-actions/changed-files` is why.
+- **A missing prerequisite skips, it does not fail.** No provider key, no build system, no
+  routes to check: the job writes one line to its summary and stays green, so adding a
+  workflow to a repository never puts a red check on it for configuration reasons.
 - **Fork pull requests get no secrets**, so anything needing a provider key skips with an
   explanation on the job summary rather than putting a red check on a contributor's first
   pull request. Nothing here uses `pull_request_target`, which would run fork code with your
@@ -77,8 +98,16 @@ tagging, so the tag and the code it runs are the same commit.
 ```
 action.yml                       The QA Changes composite action
 qa_agent/                        Its implementation — standard library only
+smoke/, build/, pr-gate/,        The Smoke, Build, PR Gate and Diff Scope composite actions
+diff-scope/
+qa_checks/                       Their implementation — standard library only
 .github/workflows/qa.yml         The QA Changes reusable workflow
+.github/workflows/smoke.yml      The Smoke, Build and PR Gate reusable workflows
+.github/workflows/build.yml
+.github/workflows/pr-gate.yml
 .github/workflows/qa-changes.yml This repository QA'ing its own pull requests
+.github/workflows/checks.yml     This repository running its own smoke, build, gate and scope
+.github/workflows/lint.yml       actionlint and zizmor over every workflow and action here
 .github/workflows/test.yml       The unit tests
 docs/                            Per-workflow reference documentation
 USAGE.md                         Rolling QA Changes out across repositories

@@ -22,6 +22,17 @@ sensitive, and putting it in **Variables** means you can see what you are pinned
 opening a run log. A repository-level secret or variable of the same name overrides the
 organization one, which is how you give a single repo a different model.
 
+## 1b. Start with the deterministic checks
+
+QA Changes is the expensive check. Four cheaper ones need no provider and catch the failures
+that would otherwise cost the agent its whole run: [Smoke](docs/smoke.md) (does it start and
+answer), [Build](docs/build.md) (does it compile), [PR Gate](docs/pr-gate.md) (size, paths,
+TODOs, secrets, workflow lint) and [Diff Scope](docs/diff-scope.md) (what changed, patch
+coverage). Each is a ten-line caller like the one below, with the same `@v1` pin, the same
+`fail_on: none` advisory mode, and `merge_group` alongside `pull_request` so a merge queue
+re-verifies the merged result. Start with Smoke and Build; gate QA Changes on the smoke
+verdict with `needs` and `if: needs.smoke.outputs.status == 'PASS'`.
+
 ## 2. Add the workflow
 
 Two ways in. Use the first unless you have a reason not to.
