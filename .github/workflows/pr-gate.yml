@@ -102,13 +102,13 @@ jobs:
         run: |
           number="$EVENT_NUMBER"
           if [ -z "$number" ]; then
-            number=$(echo "$REF" | sed -n 's#.*/pr-\([0-9]*\)-.*#\1#p')
+            number=$(echo "$REF" | sed -n 's#.*/pr-\([0-9]*\)[-/].*#\1#p')
           fi
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
       - name: Check out the merge result with history # zizmor: ignore[artipacked]
         # gitleaks may need to fetch the base commit, so the token stays.
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
