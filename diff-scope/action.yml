@@ -1,0 +1,92 @@
+name: Diff Scope
+description: Which parts of the repository a pull request touched, and how much of its added lines are covered.
+author: khawjaahmad
+
+inputs:
+  filters:
+    description: YAML map of filter name to path globs, as dorny/paths-filter takes it.
+    required: false
+    default: ""
+  coverage_file:
+    description: Coverage report (Cobertura, LCOV, Clover or JaCoCo) produced by an earlier step.
+    required: false
+    default: ""
+  patch_coverage_min:
+    description: Minimum percent of added lines that must be covered. 0 reports without failing.
+    required: false
+    default: "0"
+  compare_branch:
+    description: Branch the coverage diff is computed against. Defaults to the PR base branch.
+    required: false
+    default: ""
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+
+outputs:
+  changes:
+    description: JSON list of the filter names that matched changed files.
+    value: ${{ steps.filter.outputs.changes }}
+  patch_coverage:
+    description: Percent of added lines covered, when coverage_file is set.
+    value: ${{ steps.coverage.outputs.patch_coverage }}
+  status:
+    description: PASS, FAIL or SKIPPED.
+    value: ${{ steps.status.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Filter changed paths
+      id: filter
+      if: inputs.filters != ''
+      uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+      with:
+        filters: ${{ inputs.filters }}
+
+    - name: Patch coverage
+      id: coverage
+      if: inputs.coverage_file != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        COVERAGE_FILE: ${{ inputs.coverage_file }}
+        COMPARE_BRANCH: ${{ inputs.compare_branch != '' && inputs.compare_branch || format('origin/{0}', github.base_ref) }}
+        MINIMUM: ${{ inputs.patch_coverage_min }}
+      run: |
+        python3 -m pip install --quiet diff-cover==10.5.1
+        git rev-parse --verify "$COMPARE_BRANCH" >/dev/null 2>&1 \
+          || git fetch --no-tags --depth=1 origin "${COMPARE_BRANCH#origin/}:refs/remotes/$COMPARE_BRANCH"
+        diff-cover "$COVERAGE_FILE" --compare-branch "$COMPARE_BRANCH" \
+          --json-report "$RUNNER_TEMP/diff-cover.json" --format "markdown:$RUNNER_TEMP/diff-cover.md" || true
+        percent=$(jq -r '.total_percent_covered // 0' "$RUNNER_TEMP/diff-cover.json")
+        echo "patch_coverage=$percent" >> "$GITHUB_OUTPUT"
+        cat "$RUNNER_TEMP/diff-cover.md" >> "$GITHUB_STEP_SUMMARY"
+        if awk -v p="$percent" -v m="$MINIMUM" 'BEGIN { exit !(p < m) }'; then
+          echo "ok=false" >> "$GITHUB_OUTPUT"; echo "patch coverage $percent% is below $MINIMUM%"
+        else
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Status
+      id: status
+      if: always()
+      shell: bash
+      env:
+        FILTERED: ${{ steps.filter.outcome }}
+        COVERED: ${{ steps.coverage.outcome }}
+        COVERAGE_OK: ${{ steps.coverage.outputs.ok }}
+        FAIL_ON: ${{ inputs.fail_on }}
+      run: |
+        if [ "$FILTERED" = skipped ] && [ "$COVERED" = skipped ]; then
+          status=SKIPPED
+          echo "Skipping diff scope: neither \`filters\` nor \`coverage_file\` set." >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$COVERED" = success ] && [ "$COVERAGE_OK" = false ]; then status=FAIL
+        elif [ "$FILTERED" = failure ] || [ "$COVERED" = failure ]; then status=FAIL
+        else status=PASS; fi
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        case ",$(echo "$FAIL_ON" | tr '[:upper:]' '[:lower:]')," in
+          *,fail,*) [ "$status" = FAIL ] && exit 1 ;;
+        esac
+        exit 0
