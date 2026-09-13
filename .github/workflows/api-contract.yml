@@ -1,0 +1,115 @@
+name: API Contract (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      spec_path:
+        description: Path to the OpenAPI document or GraphQL SDL. Auto-detected when empty.
+        required: false
+        type: string
+        default: ""
+      lint:
+        description: Lint the spec.
+        required: false
+        type: boolean
+        default: true
+      breaking:
+        description: Fail on breaking changes against the base branch.
+        required: false
+        type: boolean
+        default: true
+      base_url:
+        description: URL of a running server to fuzz.
+        required: false
+        type: string
+        default: ""
+      start_command:
+        description: Command that starts the server; needs ready_url.
+        required: false
+        type: string
+        default: ""
+      compose_file:
+        description: Compose file to bring up; needs ready_url.
+        required: false
+        type: string
+        default: ""
+      ready_url:
+        description: URL polled until the server answers.
+        required: false
+        type: string
+        default: ""
+      ready_timeout:
+        description: Seconds to wait for readiness.
+        required: false
+        type: number
+        default: 120
+      max_examples:
+        description: Schemathesis examples per operation.
+        required: false
+        type: number
+        default: 50
+      hurl_dir:
+        description: Directory of `.hurl` files.
+        required: false
+        type: string
+        default: ""
+      setup_command:
+        description: Command run before the server starts.
+        required: false
+        type: string
+        default: ""
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 20
+    secrets:
+      auth_header:
+        description: Header sent with every fuzzing request.
+        required: false
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.api.outputs.status }}
+
+jobs:
+  api:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.api.outputs.status }}
+    steps:
+      - name: Check out the merge result with history # zizmor: ignore[artipacked]
+        # The base spec is read from the base branch, which may need a fetch.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: API contract
+        id: api
+        uses: khawjaahmad/github-workflows/api-contract@v1.3.0 # zizmor: ignore[unpinned-uses]
+        with:
+          spec_path: ${{ inputs.spec_path }}
+          base_ref: ${{ github.base_ref || github.event.merge_group.base_ref }}
+          lint: ${{ inputs.lint }}
+          breaking: ${{ inputs.breaking }}
+          base_url: ${{ inputs.base_url }}
+          start_command: ${{ inputs.start_command }}
+          compose_file: ${{ inputs.compose_file }}
+          ready_url: ${{ inputs.ready_url }}
+          ready_timeout: ${{ inputs.ready_timeout }}
+          auth_header: ${{ secrets.auth_header }}
+          max_examples: ${{ inputs.max_examples }}
+          hurl_dir: ${{ inputs.hurl_dir }}
+          setup_command: ${{ inputs.setup_command }}
+          fail_on: ${{ inputs.fail_on }}

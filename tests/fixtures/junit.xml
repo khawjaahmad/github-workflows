@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="fixture" tests="2" failures="0" errors="0" skipped="0" time="0.01">
+    <testcase classname="fixture.Smoke" name="starts" time="0.005"/>
+    <testcase classname="fixture.Smoke" name="answers" time="0.005"/>
+  </testsuite>
+</testsuites>

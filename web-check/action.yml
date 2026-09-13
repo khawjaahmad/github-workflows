@@ -1,0 +1,133 @@
+name: Web Check
+description: Load every route of a site in a real browser and report console and network errors, accessibility, broken links and Lighthouse scores.
+author: khawjaahmad
+
+inputs:
+  url:
+    description: URL of a running site (a preview deployment, for example). Exclusive with start_command.
+    required: false
+    default: ""
+  start_command:
+    description: Command that starts the site in the background; needs port.
+    required: false
+    default: ""
+  compose_file:
+    description: Compose file brought up with `docker compose up --wait`; needs port.
+    required: false
+    default: ""
+  port:
+    description: Port the started site answers on at 127.0.0.1.
+    required: false
+    default: ""
+  ready_timeout:
+    description: Seconds to wait for the site to answer.
+    required: false
+    default: "120"
+  routes:
+    description: Newline-separated paths to check. Empty means the sitemap, else a one-level crawl from the front page.
+    required: false
+    default: ""
+  max_routes:
+    description: Cap on discovered routes.
+    required: false
+    default: "25"
+  console_errors:
+    description: Fail a route on console errors, page errors, failed requests or 4xx/5xx responses.
+    required: false
+    default: "true"
+  links:
+    description: Crawl the site and fail on broken links.
+    required: false
+    default: "true"
+  accessibility:
+    description: Run axe on every route and fail on serious or critical violations.
+    required: false
+    default: "true"
+  lighthouse:
+    description: Run Lighthouse on the first routes and fail on scores under the budget.
+    required: false
+    default: "true"
+  lighthouse_budget:
+    description: Minimum score (0-100) for every Lighthouse category.
+    required: false
+    default: "80"
+  lighthouse_routes:
+    description: How many routes Lighthouse runs on.
+    required: false
+    default: "3"
+  setup_command:
+    description: Command run before the site starts.
+    required: false
+    default: ""
+  command_timeout:
+    description: Seconds allowed for the whole browser run.
+    required: false
+    default: "900"
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+  upload_artifacts:
+    description: Upload screenshots, reports and logs as a workflow artifact.
+    required: false
+    default: "true"
+  python_version:
+    description: Python version used to run the check.
+    required: false
+    default: "3.11"
+
+outputs:
+  status:
+    description: PASS, FAIL or SKIPPED.
+    value: ${{ steps.web.outputs.status }}
+  url:
+    description: The URL the checks ran against.
+    value: ${{ steps.web.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python for the web check
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install the browser checks
+      shell: bash
+      run: npm ci --ignore-scripts --no-audit --no-fund --prefix "${{ github.action_path }}"
+
+    - name: Web check
+      id: web
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}/..
+        QA_WORKSPACE: ${{ github.workspace }}
+        QA_ARTIFACTS_DIR: ${{ runner.temp }}/web-check-artifacts
+        QA_WEB_SCRIPT_DIR: ${{ github.action_path }}
+        QA_WEB_URL: ${{ inputs.url }}
+        QA_WEB_START_COMMAND: ${{ inputs.start_command }}
+        QA_WEB_COMPOSE_FILE: ${{ inputs.compose_file }}
+        QA_WEB_PORT: ${{ inputs.port }}
+        QA_WEB_READY_TIMEOUT: ${{ inputs.ready_timeout }}
+        QA_WEB_ROUTES: ${{ inputs.routes }}
+        QA_WEB_MAX_ROUTES: ${{ inputs.max_routes }}
+        QA_WEB_CONSOLE_ERRORS: ${{ inputs.console_errors }}
+        QA_WEB_LINKS: ${{ inputs.links }}
+        QA_WEB_ACCESSIBILITY: ${{ inputs.accessibility }}
+        QA_WEB_LIGHTHOUSE: ${{ inputs.lighthouse }}
+        QA_WEB_LIGHTHOUSE_BUDGET: ${{ inputs.lighthouse_budget }}
+        QA_WEB_LIGHTHOUSE_ROUTES: ${{ inputs.lighthouse_routes }}
+        QA_WEB_SETUP_COMMAND: ${{ inputs.setup_command }}
+        QA_WEB_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        QA_WEB_FAIL_ON: ${{ inputs.fail_on }}
+      run: python -m qa_checks.web_check
+
+    - name: Upload web check artifacts
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: web-check-${{ github.job }}-${{ github.action }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/web-check-artifacts
+        if-no-files-found: ignore
+        retention-days: 14

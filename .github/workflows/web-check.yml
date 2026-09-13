@@ -1,0 +1,126 @@
+name: Web Check (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      url:
+        description: URL of a running site. Exclusive with start_command.
+        required: false
+        type: string
+        default: ""
+      start_command:
+        description: Command that starts the site; needs port.
+        required: false
+        type: string
+        default: ""
+      compose_file:
+        description: Compose file to bring up; needs port.
+        required: false
+        type: string
+        default: ""
+      port:
+        description: Port the started site answers on.
+        required: false
+        type: string
+        default: ""
+      ready_timeout:
+        description: Seconds to wait for the site.
+        required: false
+        type: number
+        default: 120
+      routes:
+        description: Newline-separated paths. Empty means sitemap, else a one-level crawl.
+        required: false
+        type: string
+        default: ""
+      max_routes:
+        description: Cap on discovered routes.
+        required: false
+        type: number
+        default: 25
+      console_errors:
+        description: Fail routes on console, page and network errors.
+        required: false
+        type: boolean
+        default: true
+      links:
+        description: Fail on broken links.
+        required: false
+        type: boolean
+        default: true
+      accessibility:
+        description: Fail on serious or critical axe violations.
+        required: false
+        type: boolean
+        default: true
+      lighthouse:
+        description: Fail on Lighthouse scores under the budget.
+        required: false
+        type: boolean
+        default: true
+      lighthouse_budget:
+        description: Minimum score for every Lighthouse category.
+        required: false
+        type: number
+        default: 80
+      lighthouse_routes:
+        description: How many routes Lighthouse runs on.
+        required: false
+        type: number
+        default: 3
+      setup_command:
+        description: Command run before the site starts.
+        required: false
+        type: string
+        default: ""
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label. Needs Google Chrome, which ubuntu-latest has.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 25
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.web.outputs.status }}
+
+jobs:
+  web:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.web.outputs.status }}
+    steps:
+      - name: Check out the merge result
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Web check
+        id: web
+        uses: khawjaahmad/github-workflows/web-check@v1.3.0 # zizmor: ignore[unpinned-uses]
+        with:
+          url: ${{ inputs.url }}
+          start_command: ${{ inputs.start_command }}
+          compose_file: ${{ inputs.compose_file }}
+          port: ${{ inputs.port }}
+          ready_timeout: ${{ inputs.ready_timeout }}
+          routes: ${{ inputs.routes }}
+          max_routes: ${{ inputs.max_routes }}
+          console_errors: ${{ inputs.console_errors }}
+          links: ${{ inputs.links }}
+          accessibility: ${{ inputs.accessibility }}
+          lighthouse: ${{ inputs.lighthouse }}
+          lighthouse_budget: ${{ inputs.lighthouse_budget }}
+          lighthouse_routes: ${{ inputs.lighthouse_routes }}
+          setup_command: ${{ inputs.setup_command }}
+          fail_on: ${{ inputs.fail_on }}

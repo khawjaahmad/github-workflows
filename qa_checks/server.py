@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 from qa_agent import tools
 
@@ -116,10 +117,17 @@ def command(kind, command_line, config):
     return (kind, code == 0, "`%s` exit %d: %s" % (command_line, code, tail(output)))
 
 
-def hurl(config):
+def origin(url):
+    """scheme://host[:port] of a URL, so a ready URL with a path can still name the server."""
+    parts = urlsplit(url)
+    return "%s://%s" % (parts.scheme, parts.netloc) if parts.scheme and parts.netloc else url
+
+
+def hurl(config, base_url=""):
+    """Run the .hurl files with `base_url` set to the server's origin (or the given base)."""
     report = os.path.join(config.artifacts_dir or config.workspace, "hurl-junit.xml")
     command_line = "hurl --test --variable base_url=%s --report-junit %s %s" % (
-        config.ready_url.rstrip("/"),
+        (base_url or origin(config.ready_url)).rstrip("/"),
         report,
         config.hurl_dir,
     )

@@ -1,0 +1,89 @@
+name: Mobile Smoke (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      app_path:
+        description: Path to the APK. With app_artifact, the path inside the artifact.
+        required: true
+        type: string
+      app_artifact:
+        description: Name of a workflow artifact, from an earlier job, that holds the APK.
+        required: false
+        type: string
+        default: ""
+      package:
+        description: Application id. Read from the APK when empty.
+        required: false
+        type: string
+        default: ""
+      api_level:
+        description: Android API level of the emulator.
+        required: false
+        type: number
+        default: 34
+      monkey_events:
+        description: Pseudo-random UI events the monkey sends. 0 disables.
+        required: false
+        type: number
+        default: 2000
+      flows_dir:
+        description: Directory of Maestro flows.
+        required: false
+        type: string
+        default: ""
+      cloud:
+        description: "`none`, or `firebase-robo` (the caller must authenticate gcloud first)."
+        required: false
+        type: string
+        default: none
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label. Needs KVM, which ubuntu-latest has.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 30
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.mobile.outputs.status }}
+
+jobs:
+  mobile:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.smoke.outputs.status }}
+    steps:
+      - name: Check out the merge result
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the app artifact
+        if: inputs.app_artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.app_artifact }}
+          path: mobile-app
+
+      - name: Mobile smoke
+        id: smoke
+        uses: khawjaahmad/github-workflows/mobile-smoke@v1.3.0 # zizmor: ignore[unpinned-uses]
+        with:
+          app_path: ${{ inputs.app_artifact != '' && format('mobile-app/{0}', inputs.app_path) || inputs.app_path }}
+          package: ${{ inputs.package }}
+          api_level: ${{ inputs.api_level }}
+          monkey_events: ${{ inputs.monkey_events }}
+          flows_dir: ${{ inputs.flows_dir }}
+          cloud: ${{ inputs.cloud }}
+          fail_on: ${{ inputs.fail_on }}
