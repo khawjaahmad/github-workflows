@@ -1,0 +1,133 @@
+name: PR Gate (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      max_lines_changed:
+        description: Fail above this many added plus deleted lines. 0 disables.
+        required: false
+        type: number
+        default: 1500
+      ignore_globs:
+        description: Globs excluded from the line count.
+        required: false
+        type: string
+        default: ""
+      allowed_paths:
+        description: Globs every changed file must match.
+        required: false
+        type: string
+        default: ""
+      forbidden_paths:
+        description: Globs no changed file may match.
+        required: false
+        type: string
+        default: ""
+      no_new_todos:
+        description: Fail when the diff adds a TODO or FIXME.
+        required: false
+        type: boolean
+        default: true
+      require_tests_for:
+        description: Globs of source files that need an accompanying test change.
+        required: false
+        type: string
+        default: ""
+      test_globs:
+        description: Globs that identify test files.
+        required: false
+        type: string
+        default: ""
+      secrets:
+        description: Scan the PR's commits with gitleaks.
+        required: false
+        type: boolean
+        default: true
+      workflow_lint:
+        description: Lint workflows with actionlint and zizmor when .github/ changed.
+        required: false
+        type: boolean
+        default: true
+      dependency_review:
+        description: Run dependency review when the dependency graph is enabled.
+        required: false
+        type: boolean
+        default: false
+      label_agent_prs:
+        description: Label PRs that look agent-authored.
+        required: false
+        type: boolean
+        default: true
+      agent_logins:
+        description: Comma-separated bot logins treated as coding agents.
+        required: false
+        type: string
+        default: ""
+      agent_label:
+        description: The label to add.
+        required: false
+        type: string
+        default: ai-generated
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+    outputs:
+      status:
+        description: PASS or FAIL.
+        value: ${{ jobs.gate.outputs.status }}
+      is_agent_pr:
+        description: true when the PR looks agent-authored.
+        value: ${{ jobs.gate.outputs.is_agent_pr }}
+
+jobs:
+  gate:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 10
+    outputs:
+      status: ${{ steps.gate.outputs.status }}
+      is_agent_pr: ${{ steps.gate.outputs.is_agent_pr }}
+    steps:
+      - name: Resolve the pull request
+        id: pr
+        env:
+          EVENT_NUMBER: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref }}
+        run: |
+          number="$EVENT_NUMBER"
+          if [ -z "$number" ]; then
+            number=$(echo "$REF" | sed -n 's#.*/pr-\([0-9]*\)[-/].*#\1#p')
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the merge result with history # zizmor: ignore[artipacked]
+        # gitleaks may need to fetch the base commit, so the token stays.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: PR gate
+        id: gate
+        uses: khawjaahmad/github-workflows/pr-gate@v1.2.0 # zizmor: ignore[unpinned-uses]
+        with:
+          pr_number: ${{ steps.pr.outputs.number }}
+          max_lines_changed: ${{ inputs.max_lines_changed }}
+          ignore_globs: ${{ inputs.ignore_globs }}
+          allowed_paths: ${{ inputs.allowed_paths }}
+          forbidden_paths: ${{ inputs.forbidden_paths }}
+          no_new_todos: ${{ inputs.no_new_todos }}
+          require_tests_for: ${{ inputs.require_tests_for }}
+          test_globs: ${{ inputs.test_globs }}
+          secrets: ${{ inputs.secrets }}
+          workflow_lint: ${{ inputs.workflow_lint }}
+          dependency_review: ${{ inputs.dependency_review }}
+          label_agent_prs: ${{ inputs.label_agent_prs }}
+          agent_logins: ${{ inputs.agent_logins }}
+          agent_label: ${{ inputs.agent_label }}
+          fail_on: ${{ inputs.fail_on }}

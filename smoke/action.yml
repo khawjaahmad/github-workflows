@@ -1,0 +1,106 @@
+name: Smoke
+description: Start the software, wait until it answers, check its routes and commands.
+author: khawjaahmad
+
+inputs:
+  start_command:
+    description: Command that starts the software in the background. Exclusive with compose_file.
+    required: false
+    default: ""
+  compose_file:
+    description: Compose file to bring up with `docker compose up --wait`. Exclusive with start_command.
+    required: false
+    default: ""
+  ready_url:
+    description: URL polled until it answers with a status below 500. Routes are relative to it.
+    required: false
+    default: ""
+  ready_timeout:
+    description: Seconds to wait for ready_url (and for compose services to become healthy).
+    required: false
+    default: "120"
+  routes:
+    description: Newline-separated `path[=expected_status]` entries checked after readiness.
+    required: false
+    default: ""
+  commands:
+    description: Newline-separated shell commands that must exit 0.
+    required: false
+    default: ""
+  hurl_dir:
+    description: Directory of `.hurl` files run against ready_url (as `{{base_url}}`).
+    required: false
+    default: ""
+  setup_command:
+    description: Command run before anything starts.
+    required: false
+    default: ""
+  command_timeout:
+    description: Seconds allowed for the setup command and each smoke command.
+    required: false
+    default: "300"
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+  upload_artifacts:
+    description: Upload server logs and reports as a workflow artifact.
+    required: false
+    default: "true"
+  python_version:
+    description: Python version used to run the check.
+    required: false
+    default: "3.11"
+
+outputs:
+  status:
+    description: PASS, FAIL or SKIPPED.
+    value: ${{ steps.smoke.outputs.status }}
+  ready_url:
+    description: The URL the routes were checked against.
+    value: ${{ steps.smoke.outputs.ready_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python for the smoke check
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install hurl
+      if: inputs.hurl_dir != ''
+      shell: bash
+      run: |
+        curl -sSLo /tmp/hurl.deb \
+          https://github.com/Orange-OpenSource/hurl/releases/download/8.0.1/hurl_8.0.1_amd64.deb
+        sudo dpkg -i /tmp/hurl.deb
+
+    - name: Smoke
+      id: smoke
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}/..
+        QA_WORKSPACE: ${{ github.workspace }}
+        QA_ARTIFACTS_DIR: ${{ runner.temp }}/smoke-artifacts
+        QA_SMOKE_START_COMMAND: ${{ inputs.start_command }}
+        QA_SMOKE_COMPOSE_FILE: ${{ inputs.compose_file }}
+        QA_SMOKE_READY_URL: ${{ inputs.ready_url }}
+        QA_SMOKE_READY_TIMEOUT: ${{ inputs.ready_timeout }}
+        QA_SMOKE_ROUTES: ${{ inputs.routes }}
+        QA_SMOKE_COMMANDS: ${{ inputs.commands }}
+        QA_SMOKE_HURL_DIR: ${{ inputs.hurl_dir }}
+        QA_SMOKE_SETUP_COMMAND: ${{ inputs.setup_command }}
+        QA_SMOKE_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        QA_SMOKE_FAIL_ON: ${{ inputs.fail_on }}
+      run: python -m qa_checks.smoke
+
+    - name: Upload smoke artifacts
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: smoke-${{ github.job }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/smoke-artifacts
+        if-no-files-found: ignore
+        retention-days: 14

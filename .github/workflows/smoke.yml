@@ -1,0 +1,100 @@
+name: Smoke (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      start_command:
+        description: Command that starts the software in the background. Exclusive with compose_file.
+        required: false
+        type: string
+        default: ""
+      compose_file:
+        description: Compose file brought up with `docker compose up --wait`.
+        required: false
+        type: string
+        default: ""
+      ready_url:
+        description: URL polled until it answers with a status below 500.
+        required: false
+        type: string
+        default: ""
+      ready_timeout:
+        description: Seconds to wait for readiness.
+        required: false
+        type: number
+        default: 120
+      routes:
+        description: Newline-separated `path[=expected_status]` entries.
+        required: false
+        type: string
+        default: ""
+      commands:
+        description: Newline-separated shell commands that must exit 0.
+        required: false
+        type: string
+        default: ""
+      hurl_dir:
+        description: Directory of `.hurl` files run against ready_url.
+        required: false
+        type: string
+        default: ""
+      setup_command:
+        description: Command run before anything starts.
+        required: false
+        type: string
+        default: ""
+      command_timeout:
+        description: Seconds allowed per command.
+        required: false
+        type: number
+        default: 300
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 15
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.smoke.outputs.status }}
+      ready_url:
+        description: The URL the routes were checked against.
+        value: ${{ jobs.smoke.outputs.ready_url }}
+
+jobs:
+  smoke:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.smoke.outputs.status }}
+      ready_url: ${{ steps.smoke.outputs.ready_url }}
+    steps:
+      - name: Check out the merge result
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Smoke
+        id: smoke
+        uses: khawjaahmad/github-workflows/smoke@v1.2.0 # zizmor: ignore[unpinned-uses]
+        with:
+          start_command: ${{ inputs.start_command }}
+          compose_file: ${{ inputs.compose_file }}
+          ready_url: ${{ inputs.ready_url }}
+          ready_timeout: ${{ inputs.ready_timeout }}
+          routes: ${{ inputs.routes }}
+          commands: ${{ inputs.commands }}
+          hurl_dir: ${{ inputs.hurl_dir }}
+          setup_command: ${{ inputs.setup_command }}
+          command_timeout: ${{ inputs.command_timeout }}
+          fail_on: ${{ inputs.fail_on }}

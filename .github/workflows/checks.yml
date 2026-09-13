@@ -1,0 +1,107 @@
+name: Checks
+
+# This repository exercising its own smoke, build, diff-scope and pr-gate actions.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: smoke
+        uses: ./smoke
+        with:
+          start_command: python3 -m http.server 8765
+          ready_url: http://127.0.0.1:8765/
+          routes: |
+            /README.md
+            /does-not-exist=404
+          commands: |
+            python3 --version
+            python3 -m unittest discover -s tests
+      - name: The verdict is PASS
+        env:
+          STATUS: ${{ steps.smoke.outputs.status }}
+        run: test "$STATUS" = PASS
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: build
+        uses: ./build
+      - name: Nothing to build here, so the verdict is SKIPPED
+        env:
+          STATUS: ${{ steps.build.outputs.status }}
+        run: test "$STATUS" = SKIPPED
+      - id: custom
+        uses: ./build
+        with:
+          build_command: python -m compileall -q qa_agent qa_checks
+      - name: A custom command builds and passes
+        env:
+          STATUS: ${{ steps.custom.outputs.status }}
+          DETECTED: ${{ steps.custom.outputs.detected }}
+        run: test "$STATUS" = PASS && test "$DETECTED" = custom
+
+  diff-scope:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out with history # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: python3 -m pip install --quiet coverage && python3 -m coverage run -m unittest discover -s tests && python3 -m coverage xml
+      - id: scope
+        uses: ./diff-scope
+        with:
+          filters: |
+            python:
+              - 'qa_agent/**'
+              - 'qa_checks/**'
+            workflows:
+              - '.github/**'
+              - '*/action.yml'
+          coverage_file: coverage.xml
+      - env:
+          CHANGES: ${{ steps.scope.outputs.changes }}
+          PATCH: ${{ steps.scope.outputs.patch_coverage }}
+          STATUS: ${{ steps.scope.outputs.status }}
+        run: echo "changes=$CHANGES patch_coverage=$PATCH status=$STATUS"
+
+  pr-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out with history # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./pr-gate
+        with:
+          max_lines_changed: 5000
+          require_tests_for: qa_agent/*.py,qa_checks/*.py
+          fail_on: none

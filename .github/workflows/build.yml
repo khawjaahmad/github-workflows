@@ -1,0 +1,64 @@
+name: Build (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      build_command:
+        description: Build command. When set, detection is skipped.
+        required: false
+        type: string
+        default: ""
+      working_directory:
+        description: Directory, relative to the workspace, to detect and build in.
+        required: false
+        type: string
+        default: "."
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      build_timeout_minutes:
+        description: Minutes allowed for the build command. Keep under timeout_minutes.
+        required: false
+        type: number
+        default: 20
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 25
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.build.outputs.status }}
+      detected:
+        description: The build system detected, or empty.
+        value: ${{ jobs.build.outputs.detected }}
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.build.outputs.status }}
+      detected: ${{ steps.build.outputs.detected }}
+    steps:
+      - name: Check out the merge result
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build
+        id: build
+        uses: khawjaahmad/github-workflows/build@v1.2.0 # zizmor: ignore[unpinned-uses]
+        with:
+          build_command: ${{ inputs.build_command }}
+          working_directory: ${{ inputs.working_directory }}
+          timeout_minutes: ${{ inputs.build_timeout_minutes }}
+          fail_on: ${{ inputs.fail_on }}

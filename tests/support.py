@@ -131,17 +131,56 @@ class LLMServer(_Server):
 class GitHubServer(_Server):
     """An in-memory issue-comments API, paginated like the real one."""
 
-    def __init__(self, comments=(), pull_request=None, diff="diff --git a/a b/a"):
+    def __init__(
+        self,
+        comments=(),
+        pull_request=None,
+        diff="diff --git a/a b/a",
+        files=(),
+        commits=(),
+        graph_enabled=False,
+    ):
         super().__init__(("127.0.0.1", 0), _Handler)
         self.comments = [dict(comment) for comment in comments]
         self.pull_request = pull_request or PULL_REQUEST
         self.diff = diff
+        self.files = [dict(item) for item in files]
+        self.commits = [dict(item) for item in commits]
+        self.graph_enabled = graph_enabled
+        self.labels = []
         self.next_id = 1000
         self.calls = []
+
+    def _page(self, handler, query, items):
+        query = parse_qs(query)
+        per_page = int(query.get("per_page", ["30"])[0])
+        page = int(query.get("page", ["1"])[0])
+        start = (page - 1) * per_page
+        self.reply(handler, 200, items[start : start + per_page])
 
     def handle_request_for(self, handler, method):
         parsed = urlparse(handler.path)
         self.calls.append((method, parsed.path, parsed.query))
+
+        if method == "GET" and "/dependency-graph/compare/" in parsed.path:
+            if self.graph_enabled:
+                self.reply(handler, 200, [])
+            else:
+                self.reply(handler, 403, {"message": "Dependency graph is disabled"})
+            return
+
+        if method == "GET" and parsed.path.endswith("/files"):
+            self._page(handler, parsed.query, self.files)
+            return
+
+        if method == "GET" and parsed.path.endswith("/commits"):
+            self._page(handler, parsed.query, self.commits)
+            return
+
+        if method == "POST" and parsed.path.endswith("/labels"):
+            self.labels += self.read_body(handler)["labels"]
+            self.reply(handler, 200, [{"name": name} for name in self.labels])
+            return
 
         if method == "GET" and "/pulls/" in parsed.path:
             if (handler.headers.get("Accept") or "").endswith("diff"):
@@ -151,11 +190,7 @@ class GitHubServer(_Server):
             return
 
         if method == "GET" and parsed.path.endswith("/comments"):
-            query = parse_qs(parsed.query)
-            per_page = int(query.get("per_page", ["30"])[0])
-            page = int(query.get("page", ["1"])[0])
-            start = (page - 1) * per_page
-            self.reply(handler, 200, self.comments[start : start + per_page])
+            self._page(handler, parsed.query, self.comments)
             return
 
         if method == "POST" and parsed.path.endswith("/comments"):

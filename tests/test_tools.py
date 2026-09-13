@@ -191,3 +191,13 @@ class ArtifactsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExecuteTests(unittest.TestCase):
+    def test_returns_the_exit_code_and_output(self):
+        self.assertEqual(tools.execute("echo hi; exit 4", tempfile.mkdtemp(), 20), (4, "hi\n"))
+
+    def test_a_timeout_is_none(self):
+        code, output = tools.execute("echo start; sleep 10", tempfile.mkdtemp(), 1)
+        self.assertIsNone(code)
+        self.assertIn("start", output)
