@@ -27,6 +27,11 @@ repository.
 | **Mobile Smoke** | Composite action | `khawjaahmad/github-workflows/mobile-smoke@v1` | [Reference](docs/mobile-smoke.md) |
 | **Mobile Smoke** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/mobile-smoke.yml@v1` | [Reference](docs/mobile-smoke.md) |
 | **Test Report** | Composite action | `khawjaahmad/github-workflows/test-report@v1` | [Reference](docs/test-report.md) |
+| **Preview Smoke** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/preview-smoke.yml@v1` | [Reference](docs/preview-smoke.md) |
+| **Migration Lint** | Composite action | `khawjaahmad/github-workflows/migration-lint@v1` | [Reference](docs/migration-lint.md) |
+| **Migration Lint** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/migration-lint.yml@v1` | [Reference](docs/migration-lint.md) |
+| **Release Verify** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/release-verify.yml@v1` | [Reference](docs/release-verify.md) |
+| **AI Second Opinion** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/ai-review.yml@v1` | [Reference](docs/ai-review.md) |
 
 **QA Changes** validates a pull request by *running the software* rather than reading the
 diff. It sets up the repository, exercises the changed behaviour as a real user would — CLI,
@@ -48,6 +53,13 @@ a real browser and reports console and network errors, accessibility, broken lin
 Lighthouse scores. **Mobile Smoke** installs an APK on an emulator, launches it, reads the
 crash log and runs the monkey. **Test Report** publishes JUnit results as a check and feeds
 a flaky-test service; it does not run tests.
+
+Four more sit off the merge path or beside it. **Preview Smoke** runs the smoke routes
+against a deployment's preview URL once the platform reports it live. **Migration Lint**
+runs squawk over the SQL migrations a pull request touches and the repository's own drift
+check. **Release Verify** enforces Conventional Commits titles and produces an SBOM and
+build provenance. **AI Second Opinion** asks Claude Code to run the change and report, and
+is always advisory.
 
 ## Using any of this
 
@@ -116,7 +128,7 @@ qa_agent/                        Its implementation — standard library only
 smoke/, build/, pr-gate/,        The composite actions, one directory each
 diff-scope/, api-contract/,
 web-check/, mobile-smoke/,
-test-report/
+test-report/, migration-lint/
 qa_checks/                       Their implementation — standard library only
 web-check/check.mjs              The browser checks, with a pinned package-lock.json
 .github/workflows/qa.yml         The QA Changes reusable workflow
@@ -126,6 +138,10 @@ web-check/check.mjs              The browser checks, with a pinned package-lock.
 .github/workflows/api-contract.yml
 .github/workflows/web-check.yml
 .github/workflows/mobile-smoke.yml
+.github/workflows/migration-lint.yml
+.github/workflows/preview-smoke.yml  Reusable workflows with no action of their own
+.github/workflows/release-verify.yml
+.github/workflows/ai-review.yml
 .github/workflows/qa-changes.yml This repository QA'ing its own pull requests
 .github/workflows/checks.yml     This repository running its own actions against fixtures
 .github/workflows/lint.yml       actionlint and zizmor over every workflow and action here

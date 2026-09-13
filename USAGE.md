@@ -36,7 +36,11 @@ verdict with `needs` and `if: needs.smoke.outputs.status == 'PASS'`.
 When the repository has an API spec, a web front end, an Android app or a JUnit report, add
 [API Contract](docs/api-contract.md), [Web Check](docs/web-check.md),
 [Mobile Smoke](docs/mobile-smoke.md) or [Test Report](docs/test-report.md). Each needs one
-input (a spec path, a URL or port, an APK, a glob) and is otherwise the same shape.
+input (a spec path, a URL or port, an APK, a glob) and is otherwise the same shape. The
+rest are situational: [Preview Smoke](docs/preview-smoke.md) for repositories with a
+deployment platform, [Migration Lint](docs/migration-lint.md) for repositories with SQL
+migrations, [Release Verify](docs/release-verify.md) for release hygiene, and
+[AI Second Opinion](docs/ai-review.md) as an advisory extra.
 
 ## 2. Add the workflow
 
