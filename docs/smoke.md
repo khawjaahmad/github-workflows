@@ -51,8 +51,9 @@ services, a container, or a different runner.
    Relative paths are joined to `ready_url`; full URLs are used as given. Redirects are not
    followed, so `=302` is a valid expectation.
 5. Runs each command with `bash -c`; each must exit 0 within `command_timeout`.
-6. Runs `hurl --test` over `hurl_dir` when set, with `base_url` as a variable and a JUnit
-   report in the artifacts.
+6. Runs `hurl --test` over `hurl_dir` when set, with the origin of `ready_url`
+   (`scheme://host:port`, path dropped) as the `base_url` variable and a JUnit report in the
+   artifacts.
 7. Stops the server (or `docker compose down --volumes --remove-orphans`), writes a results
    table to the job summary, and uploads the logs as a workflow artifact.
 

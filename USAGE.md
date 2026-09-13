@@ -33,6 +33,11 @@ coverage). Each is a ten-line caller like the one below, with the same `@v1` pin
 re-verifies the merged result. Start with Smoke and Build; gate QA Changes on the smoke
 verdict with `needs` and `if: needs.smoke.outputs.status == 'PASS'`.
 
+When the repository has an API spec, a web front end, an Android app or a JUnit report, add
+[API Contract](docs/api-contract.md), [Web Check](docs/web-check.md),
+[Mobile Smoke](docs/mobile-smoke.md) or [Test Report](docs/test-report.md). Each needs one
+input (a spec path, a URL or port, an APK, a glob) and is otherwise the same shape.
+
 ## 2. Add the workflow
 
 Two ways in. Use the first unless you have a reason not to.
