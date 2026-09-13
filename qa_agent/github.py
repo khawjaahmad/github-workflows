@@ -53,6 +53,51 @@ def get_diff(token, repo, number, max_chars=120000, api_root=None):
     return diff
 
 
+def _paginate(token, path, api_root=None):
+    """Every item of a list endpoint, following per_page/page like the API does."""
+    items = []
+    page = 1
+    while True:
+        chunk = _call(token, "GET", "%s?per_page=100&page=%d" % (path, page), api_root=api_root)
+        items.extend(chunk)
+        if len(chunk) < 100:
+            return items
+        page += 1
+
+
+def list_files(token, repo, number, api_root=None):
+    """The PR's changed files: filename, status, additions, deletions."""
+    return _paginate(token, "/repos/%s/pulls/%d/files" % (repo, number), api_root=api_root)
+
+
+def list_commits(token, repo, number, api_root=None):
+    return _paginate(token, "/repos/%s/pulls/%d/commits" % (repo, number), api_root=api_root)
+
+
+def add_labels(token, repo, number, labels, api_root=None):
+    return _call(
+        token,
+        "POST",
+        "/repos/%s/issues/%d/labels" % (repo, number),
+        body={"labels": list(labels)},
+        api_root=api_root,
+    )
+
+
+def dependency_graph_enabled(token, repo, base, head, api_root=None):
+    """Whether the dependency graph is on, which dependency review needs."""
+    try:
+        _call(
+            token,
+            "GET",
+            "/repos/%s/dependency-graph/compare/%s...%s" % (repo, base, head),
+            api_root=api_root,
+        )
+    except GitHubError:
+        return False
+    return True
+
+
 def post_report(token, repo, number, body, api_root=None):
     """Post the QA report as a new comment, leaving earlier reports in place."""
     return _call(

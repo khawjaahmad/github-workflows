@@ -117,7 +117,8 @@ def child_environment(environ=None):
     return safe
 
 
-def run_bash(command, workspace, timeout, environ=None):
+def execute(command, workspace, timeout, environ=None):
+    """Run a command to completion; returns (exit code or None on timeout, output)."""
     with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as sink:
         process = subprocess.Popen(
             ["bash", "-c", command],
@@ -130,15 +131,22 @@ def run_bash(command, workspace, timeout, environ=None):
         )
         try:
             returncode = process.wait(timeout=timeout)
-            header = "exit code: %d" % returncode
         except subprocess.TimeoutExpired:
-            _terminate(process)
-            header = (
-                "command timed out after %ds and was killed "
-                "(background long-running servers with &)" % timeout
-            )
+            terminate(process)
+            returncode = None
         sink.seek(0)
-        output = sink.read()
+        return returncode, sink.read()
+
+
+def run_bash(command, workspace, timeout, environ=None):
+    returncode, output = execute(command, workspace, timeout, environ)
+    if returncode is None:
+        header = (
+            "command timed out after %ds and was killed "
+            "(background long-running servers with &)" % timeout
+        )
+    else:
+        header = "exit code: %d" % returncode
 
     if len(output) > MAX_OUTPUT_CHARS:
         half = MAX_OUTPUT_CHARS // 2
@@ -150,7 +158,7 @@ def run_bash(command, workspace, timeout, environ=None):
     return "%s\n%s" % (header, output or "(no output)")
 
 
-def _terminate(process):
+def terminate(process):
     """Stop a timed-out command and anything it started."""
     for send, wait in ((signal.SIGTERM, GRACE_SECONDS), (signal.SIGKILL, GRACE_SECONDS)):
         try:

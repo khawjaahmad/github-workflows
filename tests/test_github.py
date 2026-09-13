@@ -65,3 +65,28 @@ class DiffTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PullRequestDetailTests(unittest.TestCase):
+    def test_files_and_commits_follow_pagination(self):
+        files = [{"filename": "f%d" % i, "additions": 1, "deletions": 0} for i in range(150)]
+        server = GitHubServer(files=files, commits=[{"sha": "a"}]).start()
+        self.assertEqual(len(github.list_files("t", "acme/widget", 7, api_root=server.url)), 150)
+        self.assertEqual(
+            github.list_commits("t", "acme/widget", 7, api_root=server.url), [{"sha": "a"}]
+        )
+        self.assertEqual(
+            [c[2] for c in server.calls[:2]], ["per_page=100&page=1", "per_page=100&page=2"]
+        )
+
+    def test_labels_and_dependency_graph(self):
+        server = GitHubServer(graph_enabled=False).start()
+        github.add_labels("t", "acme/widget", 7, ["ai-generated"], api_root=server.url)
+        self.assertEqual(server.labels, ["ai-generated"])
+        self.assertFalse(
+            github.dependency_graph_enabled("t", "acme/widget", "b", "h", api_root=server.url)
+        )
+        server.graph_enabled = True
+        self.assertTrue(
+            github.dependency_graph_enabled("t", "acme/widget", "b", "h", api_root=server.url)
+        )
