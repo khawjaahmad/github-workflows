@@ -85,9 +85,8 @@ class DetectionTests(unittest.TestCase):
             ("a5f8c2b", ""): "a5f8c2b",
         }
         for (explicit, github), expected in cases.items():
-            env = {"QA_API_BASE_REF": explicit, "GITHUB_BASE_REF": github}
-            with mock.patch.dict(os.environ, env, clear=False):
-                self.assertEqual(api_contract._base_ref(), expected, (explicit, github))
+            with mock.patch.dict(os.environ, {"GITHUB_BASE_REF": github}, clear=False):
+                self.assertEqual(common.base_ref(explicit), expected, (explicit, github))
 
 
 class MainTests(unittest.TestCase):
