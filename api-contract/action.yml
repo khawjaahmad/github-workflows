@@ -1,0 +1,147 @@
+name: API Contract
+description: Lint an OpenAPI or GraphQL spec, diff it against the base branch, and fuzz a running server with it.
+author: khawjaahmad
+
+inputs:
+  spec_path:
+    description: Path to the OpenAPI document or GraphQL SDL. Auto-detected at the repository root when empty.
+    required: false
+    default: ""
+  base_ref:
+    description: Git ref holding the base spec for breaking-change detection. Defaults to the PR base branch.
+    required: false
+    default: ""
+  lint:
+    description: Lint the spec with vacuum (OpenAPI only).
+    required: false
+    default: "true"
+  breaking:
+    description: Fail on breaking changes against base_ref (oasdiff, or graphql-inspector for SDL).
+    required: false
+    default: "true"
+  base_url:
+    description: URL of a running server to fuzz with schemathesis. Exclusive with start_command.
+    required: false
+    default: ""
+  start_command:
+    description: Command that starts the server in the background; needs ready_url.
+    required: false
+    default: ""
+  compose_file:
+    description: Compose file brought up with `docker compose up --wait`; needs ready_url.
+    required: false
+    default: ""
+  ready_url:
+    description: URL polled until the started server answers. Defaults to base_url.
+    required: false
+    default: ""
+  ready_timeout:
+    description: Seconds to wait for readiness.
+    required: false
+    default: "120"
+  auth_header:
+    description: "Header sent with every fuzzing request, e.g. `Authorization: Bearer x`."
+    required: false
+    default: ""
+  max_examples:
+    description: Schemathesis examples per operation.
+    required: false
+    default: "50"
+  hurl_dir:
+    description: Directory of `.hurl` files run against the server.
+    required: false
+    default: ""
+  setup_command:
+    description: Command run before the server starts.
+    required: false
+    default: ""
+  command_timeout:
+    description: Seconds allowed per tool run.
+    required: false
+    default: "600"
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+  upload_artifacts:
+    description: Upload reports and logs as a workflow artifact.
+    required: false
+    default: "true"
+  python_version:
+    description: Python version used to run the check.
+    required: false
+    default: "3.11"
+
+outputs:
+  status:
+    description: PASS, FAIL or SKIPPED.
+    value: ${{ steps.api.outputs.status }}
+  spec_path:
+    description: The spec that was checked.
+    value: ${{ steps.api.outputs.spec_path }}
+  kind:
+    description: openapi or graphql.
+    value: ${{ steps.api.outputs.kind }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python for the API contract check
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install vacuum and oasdiff
+      shell: bash
+      run: |
+        curl -sSL https://github.com/daveshanley/vacuum/releases/download/v0.30.3/vacuum_0.30.3_linux_x86_64.tar.gz \
+          | tar -xz -C /usr/local/bin vacuum
+        curl -sSL https://github.com/oasdiff/oasdiff/releases/download/v1.31.0/oasdiff_1.31.0_linux_amd64.tar.gz \
+          | tar -xz -C /usr/local/bin oasdiff
+
+    - name: Install schemathesis
+      if: inputs.base_url != '' || inputs.start_command != '' || inputs.compose_file != ''
+      shell: bash
+      run: python -m pip install --quiet schemathesis==4.27.0
+
+    - name: Install hurl
+      if: inputs.hurl_dir != ''
+      shell: bash
+      run: |
+        curl -sSLo /tmp/hurl.deb \
+          https://github.com/Orange-OpenSource/hurl/releases/download/8.0.1/hurl_8.0.1_amd64.deb
+        sudo dpkg -i /tmp/hurl.deb
+
+    - name: API contract
+      id: api
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}/..
+        QA_WORKSPACE: ${{ github.workspace }}
+        QA_ARTIFACTS_DIR: ${{ runner.temp }}/api-contract-artifacts
+        QA_API_SPEC_PATH: ${{ inputs.spec_path }}
+        QA_API_BASE_REF: ${{ inputs.base_ref }}
+        QA_API_LINT: ${{ inputs.lint }}
+        QA_API_BREAKING: ${{ inputs.breaking }}
+        QA_API_BASE_URL: ${{ inputs.base_url }}
+        QA_API_START_COMMAND: ${{ inputs.start_command }}
+        QA_API_COMPOSE_FILE: ${{ inputs.compose_file }}
+        QA_API_READY_URL: ${{ inputs.ready_url }}
+        QA_API_READY_TIMEOUT: ${{ inputs.ready_timeout }}
+        QA_API_AUTH_HEADER: ${{ inputs.auth_header }}
+        QA_API_MAX_EXAMPLES: ${{ inputs.max_examples }}
+        QA_API_HURL_DIR: ${{ inputs.hurl_dir }}
+        QA_API_SETUP_COMMAND: ${{ inputs.setup_command }}
+        QA_API_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        QA_API_FAIL_ON: ${{ inputs.fail_on }}
+      run: python -m qa_checks.api_contract
+
+    - name: Upload API contract artifacts
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: api-contract-${{ github.job }}-${{ github.action }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/api-contract-artifacts
+        if-no-files-found: ignore
+        retention-days: 14

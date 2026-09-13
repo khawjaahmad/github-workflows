@@ -20,6 +20,13 @@ repository.
 | **PR Gate** | Composite action | `khawjaahmad/github-workflows/pr-gate@v1` | [Reference](docs/pr-gate.md) |
 | **PR Gate** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/pr-gate.yml@v1` | [Reference](docs/pr-gate.md) |
 | **Diff Scope** | Composite action | `khawjaahmad/github-workflows/diff-scope@v1` | [Reference](docs/diff-scope.md) |
+| **API Contract** | Composite action | `khawjaahmad/github-workflows/api-contract@v1` | [Reference](docs/api-contract.md) |
+| **API Contract** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/api-contract.yml@v1` | [Reference](docs/api-contract.md) |
+| **Web Check** | Composite action | `khawjaahmad/github-workflows/web-check@v1` | [Reference](docs/web-check.md) |
+| **Web Check** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/web-check.yml@v1` | [Reference](docs/web-check.md) |
+| **Mobile Smoke** | Composite action | `khawjaahmad/github-workflows/mobile-smoke@v1` | [Reference](docs/mobile-smoke.md) |
+| **Mobile Smoke** | Reusable workflow | `khawjaahmad/github-workflows/.github/workflows/mobile-smoke.yml@v1` | [Reference](docs/mobile-smoke.md) |
+| **Test Report** | Composite action | `khawjaahmad/github-workflows/test-report@v1` | [Reference](docs/test-report.md) |
 
 **QA Changes** validates a pull request by *running the software* rather than reading the
 diff. It sets up the repository, exercises the changed behaviour as a real user would — CLI,
@@ -33,6 +40,14 @@ diff size, touched paths, new TODOs, secrets, workflow lint and dependency chang
 labels agent-authored pull requests. **Diff Scope** tells other jobs which parts of the
 repository changed and how much of the added code is covered. All of them run on
 `merge_group` as well as `pull_request`, so a merge queue re-verifies the merged result.
+
+Four more take one input from the consumer and are otherwise just as stack-agnostic.
+**API Contract** lints an OpenAPI or GraphQL spec, diffs it against the base branch for
+breaking changes, and fuzzes a running server against it. **Web Check** loads every route in
+a real browser and reports console and network errors, accessibility, broken links and
+Lighthouse scores. **Mobile Smoke** installs an APK on an emulator, launches it, reads the
+crash log and runs the monkey. **Test Report** publishes JUnit results as a check and feeds
+a flaky-test service; it does not run tests.
 
 ## Using any of this
 
@@ -98,15 +113,21 @@ tagging, so the tag and the code it runs are the same commit.
 ```
 action.yml                       The QA Changes composite action
 qa_agent/                        Its implementation — standard library only
-smoke/, build/, pr-gate/,        The Smoke, Build, PR Gate and Diff Scope composite actions
-diff-scope/
+smoke/, build/, pr-gate/,        The composite actions, one directory each
+diff-scope/, api-contract/,
+web-check/, mobile-smoke/,
+test-report/
 qa_checks/                       Their implementation — standard library only
+web-check/check.mjs              The browser checks, with a pinned package-lock.json
 .github/workflows/qa.yml         The QA Changes reusable workflow
-.github/workflows/smoke.yml      The Smoke, Build and PR Gate reusable workflows
+.github/workflows/smoke.yml      The reusable workflows wrapping the actions
 .github/workflows/build.yml
 .github/workflows/pr-gate.yml
+.github/workflows/api-contract.yml
+.github/workflows/web-check.yml
+.github/workflows/mobile-smoke.yml
 .github/workflows/qa-changes.yml This repository QA'ing its own pull requests
-.github/workflows/checks.yml     This repository running its own smoke, build, gate and scope
+.github/workflows/checks.yml     This repository running its own actions against fixtures
 .github/workflows/lint.yml       actionlint and zizmor over every workflow and action here
 .github/workflows/test.yml       The unit tests
 docs/                            Per-workflow reference documentation

@@ -141,7 +141,7 @@ class SmokeConfigTests(unittest.TestCase):
 
     def test_route_specs(self):
         config = mock.Mock(ready_url="http://h:1/base/")
-        with mock.patch.object(smoke, "_status", return_value=302) as status:
+        with mock.patch.object(smoke.server, "status", return_value=302) as status:
             name, ok, detail = smoke._route(config, "/login=302")
             self.assertTrue(ok)
             status.assert_called_with("http://h:1/login")

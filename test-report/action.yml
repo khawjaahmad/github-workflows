@@ -1,0 +1,83 @@
+name: Test Report
+description: Publish JUnit results as a check with annotations, and optionally feed a flaky-test service. Never runs tests.
+author: khawjaahmad
+
+inputs:
+  junit_glob:
+    description: Glob of JUnit XML files produced by an earlier step.
+    required: true
+  name:
+    description: Name of the check run.
+    required: false
+    default: Test results
+  comment:
+    description: Also post or update a PR comment with the totals.
+    required: false
+    default: "false"
+  flaky_upload:
+    description: "`none`, or `trunk` to upload the results to Trunk Flaky Tests."
+    required: false
+    default: none
+  trunk_token:
+    description: Trunk organization token, when flaky_upload is trunk.
+    required: false
+    default: ""
+  trunk_org:
+    description: Trunk organization slug, when flaky_upload is trunk.
+    required: false
+    default: ""
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+
+outputs:
+  status:
+    description: PASS, FAIL or SKIPPED (no files matched).
+    value: ${{ steps.status.outputs.status }}
+  conclusion:
+    description: The publisher's conclusion, success or failure.
+    value: ${{ steps.status.outputs.conclusion }}
+
+runs:
+  using: composite
+  steps:
+    - name: Publish test results
+      id: publish
+      uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+      with:
+        files: ${{ inputs.junit_glob }}
+        check_name: ${{ inputs.name }}
+        comment_mode: ${{ inputs.comment == 'true' && 'always' || 'off' }}
+        action_fail: false
+        action_fail_on_inconclusive: false
+
+    - name: Upload to Trunk Flaky Tests
+      if: inputs.flaky_upload == 'trunk'
+      uses: trunk-io/analytics-uploader@385f1ccdf345b4532dc4b6c665dd432b702b8e28 # v2.1.2
+      with:
+        junit-paths: ${{ inputs.junit_glob }}
+        org-slug: ${{ inputs.trunk_org }}
+        token: ${{ inputs.trunk_token }}
+      continue-on-error: true
+
+    - name: Status
+      id: status
+      if: always()
+      shell: bash
+      env:
+        JSON: ${{ steps.publish.outputs.json }}
+        FAIL_ON: ${{ inputs.fail_on }}
+      run: |
+        conclusion=$(jq -r '.conclusion // "failure"' <<<"$JSON")
+        files=$(jq -r '.stats.files // 0' <<<"$JSON")
+        if [ "$files" = 0 ]; then status=SKIPPED; echo "Skipping test report: no files matched." >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$conclusion" = success ]; then status=PASS
+        else status=FAIL; fi
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+        echo "Test report: $status ($(jq -r '"\(.stats.tests // 0) tests, \(.stats.tests_fail // 0) failed, \(.stats.tests_error // 0) errors"' <<<"$JSON"))"
+        case ",$(echo "$FAIL_ON" | tr '[:upper:]' '[:lower:]')," in
+          *,fail,*) [ "$status" = FAIL ] && exit 1 ;;
+        esac
+        exit 0

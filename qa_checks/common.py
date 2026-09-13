@@ -61,6 +61,16 @@ def table(title, rows):
     return "\n".join(out)
 
 
+def healthy(rows):
+    """No row has failed so far."""
+    return all(ok is not False for _, ok, _ in rows)
+
+
+def log_rows(rows):
+    for name, ok, detail in rows:
+        log("[%s] %s: %s" % ({True: "ok", False: "FAIL", None: "skip"}[ok], name, detail))
+
+
 def verdict(rows):
     """PASS when every non-skipped row passed, SKIPPED when nothing ran, else FAIL."""
     ran = [ok for _, ok, _ in rows if ok is not None]

@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Fixture API
+  version: 1.0.0
+  description: A minimal spec the API Contract self-test lints and diffs.
+  contact:
+    name: QA
+  license:
+    name: MIT
+servers:
+  - url: http://127.0.0.1:8080
+tags:
+  - name: health
+    description: Liveness
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Liveness check
+      description: Returns the service version when the service is up.
+      responses:
+        "200":
+          description: The service is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+        version:
+          type: string
+          example: 1.2.0

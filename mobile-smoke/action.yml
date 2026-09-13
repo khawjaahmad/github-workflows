@@ -1,0 +1,124 @@
+name: Mobile Smoke
+description: Install an APK on an Android emulator, launch it, read the crash log, run the monkey and optional Maestro flows.
+author: khawjaahmad
+
+inputs:
+  app_path:
+    description: Path to the APK, relative to the workspace.
+    required: true
+  package:
+    description: Application id. Read from the APK when empty.
+    required: false
+    default: ""
+  api_level:
+    description: Android API level of the emulator.
+    required: false
+    default: "34"
+  arch:
+    description: Emulator architecture.
+    required: false
+    default: x86_64
+  profile:
+    description: AVD device profile.
+    required: false
+    default: pixel_6
+  monkey_events:
+    description: Pseudo-random UI events the monkey sends. 0 disables.
+    required: false
+    default: "2000"
+  flows_dir:
+    description: Directory of Maestro flows to run after the launch check.
+    required: false
+    default: ""
+  launch_wait:
+    description: Seconds to wait after launch before checking the process is alive.
+    required: false
+    default: "10"
+  cloud:
+    description: "`none`, or `firebase-robo` to also run a Firebase Test Lab Robo crawl (gcloud must already be authenticated)."
+    required: false
+    default: none
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+  upload_artifacts:
+    description: Upload screenshots and logs as a workflow artifact.
+    required: false
+    default: "true"
+  python_version:
+    description: Python version used to run the check.
+    required: false
+    default: "3.11"
+
+outputs:
+  status:
+    description: PASS, FAIL or SKIPPED.
+    value: ${{ steps.emulator.outputs.status }}
+  package:
+    description: The application id that was launched.
+    value: ${{ steps.emulator.outputs.package }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python for the mobile smoke
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Enable KVM for the emulator
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Install Maestro
+      if: inputs.flows_dir != ''
+      shell: bash
+      run: |
+        curl -Ls https://get.maestro.mobile.dev | MAESTRO_VERSION=2.10.0 bash
+
+    - name: Boot the emulator and smoke the app
+      id: emulator
+      uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+      env:
+        PYTHONPATH: ${{ github.action_path }}/..
+        QA_WORKSPACE: ${{ github.workspace }}
+        QA_ARTIFACTS_DIR: ${{ runner.temp }}/mobile-smoke-artifacts
+        QA_MOBILE_APP_PATH: ${{ inputs.app_path }}
+        QA_MOBILE_PACKAGE: ${{ inputs.package }}
+        QA_MOBILE_MONKEY_EVENTS: ${{ inputs.monkey_events }}
+        QA_MOBILE_FLOWS_DIR: ${{ inputs.flows_dir }}
+        QA_MOBILE_LAUNCH_WAIT: ${{ inputs.launch_wait }}
+        QA_MOBILE_FAIL_ON: ${{ inputs.fail_on }}
+      with:
+        api-level: ${{ inputs.api_level }}
+        arch: ${{ inputs.arch }}
+        profile: ${{ inputs.profile }}
+        target: google_apis
+        disable-animations: true
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        script: PATH="$HOME/.maestro/bin:$PATH" python -m qa_checks.mobile_smoke
+
+    - name: Firebase Test Lab Robo crawl
+      if: inputs.cloud == 'firebase-robo'
+      shell: bash
+      continue-on-error: ${{ inputs.fail_on == 'none' }}
+      env:
+        APP_PATH: ${{ inputs.app_path }}
+        RESULTS: ${{ runner.temp }}/mobile-smoke-artifacts/robo
+      run: |
+        mkdir -p "$RESULTS"
+        gcloud firebase test android run --type robo --app "$APP_PATH" --timeout 5m \
+          --results-dir "robo-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" | tee "$RESULTS/robo.log"
+
+    - name: Upload mobile smoke artifacts
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: mobile-smoke-${{ github.job }}-${{ github.action }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/mobile-smoke-artifacts
+        if-no-files-found: ignore
+        retention-days: 14

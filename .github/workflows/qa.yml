@@ -116,7 +116,7 @@ jobs:
       - name: QA the changes
         id: qa
         if: steps.preflight.outputs.ready == 'true'
-        uses: khawjaahmad/github-workflows@v1.2.0 # zizmor: ignore[unpinned-uses]
+        uses: khawjaahmad/github-workflows@v1.3.0 # zizmor: ignore[unpinned-uses]
         with:
           api_key: ${{ secrets.llm_api_key || secrets.LLM_API_KEY }}
           model: ${{ inputs.model }}

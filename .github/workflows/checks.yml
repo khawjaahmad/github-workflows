@@ -105,3 +105,67 @@ jobs:
           max_lines_changed: 5000
           require_tests_for: qa_agent/*.py,qa_checks/*.py
           fail_on: none
+
+  api-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out with history # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: api
+        uses: ./api-contract
+        with:
+          spec_path: tests/fixtures/openapi.yaml
+          base_ref: ${{ github.base_ref || github.event.merge_group.base_ref }}
+      - name: The fixture spec lints clean and is not a breaking change
+        env:
+          STATUS: ${{ steps.api.outputs.status }}
+          KIND: ${{ steps.api.outputs.kind }}
+        run: test "$STATUS" = PASS && test "$KIND" = openapi
+      - id: none
+        uses: ./api-contract
+      - name: No spec at the root, so the verdict is SKIPPED
+        env:
+          STATUS: ${{ steps.none.outputs.status }}
+        run: test "$STATUS" = SKIPPED
+
+  web-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: web
+        uses: ./web-check
+        with:
+          start_command: python3 -m http.server 8766 --bind 127.0.0.1 -d tests/fixtures/site
+          port: 8766
+          lighthouse_routes: 1
+      - name: The fixture site passes every angle
+        env:
+          STATUS: ${{ steps.web.outputs.status }}
+        run: test "$STATUS" = PASS
+
+  test-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: report
+        uses: ./test-report
+        with:
+          junit_glob: tests/fixtures/junit.xml
+          name: Fixture results
+      - name: The fixture results publish as a passing check
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: test "$STATUS" = PASS

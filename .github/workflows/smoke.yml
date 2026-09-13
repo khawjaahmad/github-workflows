@@ -86,7 +86,7 @@ jobs:
 
       - name: Smoke
         id: smoke
-        uses: khawjaahmad/github-workflows/smoke@v1.2.0 # zizmor: ignore[unpinned-uses]
+        uses: khawjaahmad/github-workflows/smoke@v1.3.0 # zizmor: ignore[unpinned-uses]
         with:
           start_command: ${{ inputs.start_command }}
           compose_file: ${{ inputs.compose_file }}

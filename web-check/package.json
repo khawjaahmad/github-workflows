@@ -1,0 +1,14 @@
+{
+  "name": "web-check",
+  "private": true,
+  "description": "Browser checks for the Web Check action: console and network errors, accessibility, links, Lighthouse.",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "chrome-launcher": "1.2.1",
+    "lighthouse": "13.4.1",
+    "linkinator": "8.1.0",
+    "playwright": "1.63.0"
+  }
+}
