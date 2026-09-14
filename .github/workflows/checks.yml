@@ -196,3 +196,27 @@ jobs:
     uses: ./.github/workflows/release-verify.yml
     with:
       sbom: true
+
+  mobile-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the fixture app from the test-fixtures release, pinned by checksum
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors -o app-release.apk \
+            https://github.com/khawjaahmad/github-workflows/releases/download/test-fixtures/app-release.apk
+          echo "9ede74b5da80f62ed6085db9cc92f42c5d860e3dc9b05ef3f4390db6b8748df4  app-release.apk" | sha256sum -c -
+      - id: mobile
+        uses: ./mobile-smoke
+        with:
+          app_path: app-release.apk
+          flows_dir: tests/fixtures/maestro
+          monkey_events: 500
+      - name: The fixture app installs, launches, survives the monkey and runs the flow
+        env:
+          STATUS: ${{ steps.mobile.outputs.status }}
+          PACKAGE: ${{ steps.mobile.outputs.package }}
+        run: test "$STATUS" = PASS && test "$PACKAGE" = com.ahmad.trolling
