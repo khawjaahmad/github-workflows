@@ -1,0 +1,77 @@
+name: Migration Lint
+description: Lint the SQL migrations a pull request touches for unsafe operations, and run the repository's own drift check.
+author: khawjaahmad
+
+inputs:
+  sql_globs:
+    description: Comma- or newline-separated globs of migration files.
+    required: false
+    default: ""
+  dialect:
+    description: "`postgres` (linted with squawk) or another dialect (only `check_command` runs)."
+    required: false
+    default: postgres
+  scope:
+    description: "`changed` lints the files the pull request added or changed; `all` lints every matching file."
+    required: false
+    default: changed
+  base_ref:
+    description: Git ref to diff against for `changed`. Defaults to the PR base branch.
+    required: false
+    default: ""
+  check_command:
+    description: Repository-specific drift check, e.g. `alembic check` or `prisma migrate diff --exit-code`.
+    required: false
+    default: ""
+  command_timeout:
+    description: Seconds allowed for the linter and the check command.
+    required: false
+    default: "600"
+  fail_on:
+    description: Verdicts that fail the check — `FAIL`, or `none` to stay advisory.
+    required: false
+    default: FAIL
+  python_version:
+    description: Python version used to run the check.
+    required: false
+    default: "3.11"
+
+outputs:
+  status:
+    description: PASS, FAIL or SKIPPED.
+    value: ${{ steps.lint.outputs.status }}
+  files:
+    description: How many SQL files were in scope.
+    value: ${{ steps.lint.outputs.files }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python for the migration lint
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install squawk
+      if: inputs.dialect == 'postgres'
+      shell: bash
+      run: |
+        curl -sSLo /usr/local/bin/squawk \
+          https://github.com/sbdchd/squawk/releases/download/v2.65.0/squawk-linux-x64
+        chmod +x /usr/local/bin/squawk
+
+    - name: Migration lint
+      id: lint
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}/..
+        QA_WORKSPACE: ${{ github.workspace }}
+        QA_MIGRATION_SQL_GLOBS: ${{ inputs.sql_globs }}
+        QA_MIGRATION_DIALECT: ${{ inputs.dialect }}
+        QA_MIGRATION_SCOPE: ${{ inputs.scope }}
+        QA_MIGRATION_BASE_REF: ${{ inputs.base_ref }}
+        QA_MIGRATION_CHECK_COMMAND: ${{ inputs.check_command }}
+        QA_MIGRATION_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        QA_MIGRATION_FAIL_ON: ${{ inputs.fail_on }}
+      run: python -m qa_checks.migration_lint

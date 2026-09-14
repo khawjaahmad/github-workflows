@@ -97,7 +97,7 @@ jobs:
 
       - name: API contract
         id: api
-        uses: khawjaahmad/github-workflows/api-contract@v1.3.0 # zizmor: ignore[unpinned-uses]
+        uses: khawjaahmad/github-workflows/api-contract@v1.4.0 # zizmor: ignore[unpinned-uses]
         with:
           spec_path: ${{ inputs.spec_path }}
           base_ref: ${{ github.base_ref || github.event.merge_group.base_ref }}

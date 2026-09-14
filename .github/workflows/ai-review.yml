@@ -1,0 +1,65 @@
+name: AI Second Opinion (reusable)
+
+# Runs Claude Code against the pull request with a prompt that asks for execution-backed
+# verification, not style review. Always advisory: the job never fails on findings.
+
+on:
+  workflow_call:
+    inputs:
+      prompt:
+        description: What to ask. The default asks for the change to be run and the real output reported.
+        required: false
+        type: string
+        default: >-
+          Verify this pull request by running it, not by reading it. Work out how the project
+          builds and runs from the files present, run the commands that exercise the changed
+          behaviour (the app, tests for the touched area, curl against endpoints), and report in
+          one comment: what you ran, the real output, and whether the change works as described.
+          Do not comment on style or structure. Keep it under 300 words.
+      max_turns:
+        description: Turn budget for the agent.
+        required: false
+        type: number
+        default: 40
+      model:
+        description: Model id passed through to the action. Empty uses the action's default.
+        required: false
+        type: string
+        default: ""
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 30
+    secrets:
+      anthropic_api_key:
+        description: Anthropic API key.
+        required: true
+
+jobs:
+  review:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - name: Check out the pull request # zizmor: ignore[artipacked]
+        # The agent runs the project's own commands, which may need to fetch.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify the change by running it
+        uses: anthropics/claude-code-action@9cdae7f0d995e3ba7c33f226087fdf82a59cd520 # v1
+        continue-on-error: true
+        with:
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          track_progress: true
+          prompt: ${{ inputs.prompt }}
+          claude_args: >-
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash,Read,Glob,Grep,mcp__github_comment__update_claude_comment"
+            ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}

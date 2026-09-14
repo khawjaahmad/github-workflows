@@ -1,7 +1,6 @@
 """Lint an API spec, diff it against the base branch, and fuzz a running server with it."""
 
 import os
-import re
 import shutil
 from dataclasses import dataclass
 
@@ -62,7 +61,7 @@ def from_env():
     return Config(
         workspace=workspace,
         spec_path=common.env("QA_API_SPEC_PATH") or detect_spec(workspace),
-        base_ref=_base_ref(),
+        base_ref=common.base_ref(common.env("QA_API_BASE_REF")),
         lint=common.bool_env("QA_API_LINT"),
         breaking=common.bool_env("QA_API_BREAKING"),
         base_url=base_url,
@@ -78,18 +77,6 @@ def from_env():
         artifacts_dir=common.env("QA_ARTIFACTS_DIR"),
         fail_on=common.parse_fail_on(common.env("QA_API_FAIL_ON", "FAIL")),
     )
-
-
-def _base_ref():
-    """The git ref holding the base spec: an explicit input, else the PR base branch."""
-    explicit = common.env("QA_API_BASE_REF")
-    if explicit:
-        branch = explicit.replace("refs/heads/", "", 1)
-        if branch.startswith(("origin/", "HEAD")) or re.fullmatch(r"[0-9a-f]{7,40}", branch):
-            return branch
-        return "origin/" + branch
-    branch = common.env("GITHUB_BASE_REF")
-    return "origin/" + branch if branch else ""
 
 
 def main():
@@ -159,13 +146,8 @@ def _breaking(config, kind):
 def _base_spec(config):
     """Write the base branch's copy of the spec to a temp file; None when it has none."""
     ref = config.base_ref
-    if tools.execute("git rev-parse --verify --quiet %s" % ref, config.workspace, 30)[0] != 0:
-        branch = ref.replace("origin/", "", 1)
-        tools.execute(
-            "git fetch --no-tags --depth=1 origin %s:refs/remotes/origin/%s" % (branch, branch),
-            config.workspace,
-            120,
-        )
+    if not common.ensure_ref(config.workspace, ref):
+        return None
     target = os.path.join(
         config.artifacts_dir or config.workspace, "base-" + os.path.basename(config.spec_path)
     )

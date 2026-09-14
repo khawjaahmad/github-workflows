@@ -1,8 +1,10 @@
 """Shared plumbing for the checks: inputs from the environment, outputs to the runner."""
 
 import os
+import re
 import sys
 
+from qa_agent import tools
 from qa_agent.config import ConfigError, parse_fail_on  # noqa: F401
 
 
@@ -84,6 +86,30 @@ def finish(status, fail_on):
     set_output("status", status)
     log("status: %s" % status)
     return 1 if status in fail_on else 0
+
+
+def base_ref(explicit=""):
+    """The git ref of the PR base: an explicit input, else GITHUB_BASE_REF, else ''."""
+    if explicit:
+        branch = explicit.replace("refs/heads/", "", 1)
+        if branch.startswith(("origin/", "HEAD")) or re.fullmatch(r"[0-9a-f]{7,40}", branch):
+            return branch
+        return "origin/" + branch
+    branch = env("GITHUB_BASE_REF")
+    return "origin/" + branch if branch else ""
+
+
+def ensure_ref(workspace, ref):
+    """Fetch `origin/<branch>` when the checkout does not have it; returns whether it exists."""
+    if tools.execute("git rev-parse --verify --quiet %s" % ref, workspace, 30)[0] == 0:
+        return True
+    branch = ref.replace("origin/", "", 1)
+    tools.execute(
+        "git fetch --no-tags --depth=1 origin %s:refs/remotes/origin/%s" % (branch, branch),
+        workspace,
+        120,
+    )
+    return tools.execute("git rev-parse --verify --quiet %s" % ref, workspace, 30)[0] == 0
 
 
 def run(main):

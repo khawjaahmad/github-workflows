@@ -1,0 +1,68 @@
+name: Migration Lint (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      sql_globs:
+        description: Globs of migration files.
+        required: false
+        type: string
+        default: ""
+      dialect:
+        description: "`postgres`, or another dialect (only check_command runs)."
+        required: false
+        type: string
+        default: postgres
+      scope:
+        description: "`changed` or `all`."
+        required: false
+        type: string
+        default: changed
+      check_command:
+        description: Repository-specific drift check.
+        required: false
+        type: string
+        default: ""
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: Job timeout.
+        required: false
+        type: number
+        default: 15
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.lint.outputs.status }}
+
+jobs:
+  lint:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      status: ${{ steps.lint.outputs.status }}
+    steps:
+      - name: Check out the merge result with history # zizmor: ignore[artipacked]
+        # The changed files are diffed against the base branch, which may need a fetch.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Migration lint
+        id: lint
+        uses: khawjaahmad/github-workflows/migration-lint@v1.4.0 # zizmor: ignore[unpinned-uses]
+        with:
+          sql_globs: ${{ inputs.sql_globs }}
+          dialect: ${{ inputs.dialect }}
+          scope: ${{ inputs.scope }}
+          base_ref: ${{ github.base_ref || github.event.merge_group.base_ref }}
+          check_command: ${{ inputs.check_command }}
+          fail_on: ${{ inputs.fail_on }}

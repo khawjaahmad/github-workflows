@@ -169,3 +169,30 @@ jobs:
         env:
           STATUS: ${{ steps.report.outputs.status }}
         run: test "$STATUS" = PASS
+
+  migration-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out with history # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: lint
+        uses: ./migration-lint
+        with:
+          sql_globs: tests/fixtures/migrations/*.sql
+          scope: all
+      - name: The fixture migration is safe
+        env:
+          STATUS: ${{ steps.lint.outputs.status }}
+          FILES: ${{ steps.lint.outputs.files }}
+        run: test "$STATUS" = PASS && test "$FILES" = 1
+
+  release-verify:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/release-verify.yml
+    with:
+      sbom: true

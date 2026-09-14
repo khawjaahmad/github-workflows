@@ -1,0 +1,70 @@
+name: Preview Smoke (reusable)
+
+# Call this from a workflow triggered by `deployment_status`. It runs the same route and
+# command checks as Smoke against the deployment's environment URL, once the platform
+# reports the deployment succeeded.
+
+on:
+  workflow_call:
+    inputs:
+      routes:
+        description: Newline-separated `path[=expected_status]` entries checked against the preview URL.
+        required: false
+        type: string
+        default: "/"
+      commands:
+        description: Newline-separated shell commands that must exit 0. `PREVIEW_URL` is set for them.
+        required: false
+        type: string
+        default: ""
+      environment:
+        description: Only react to deployments to this environment name. Empty means any.
+        required: false
+        type: string
+        default: ""
+      ready_timeout:
+        description: Seconds to wait for the preview to answer.
+        required: false
+        type: number
+        default: 120
+      fail_on:
+        description: "`FAIL`, or `none` to stay advisory."
+        required: false
+        type: string
+        default: FAIL
+      runs_on:
+        description: Runner label.
+        required: false
+        type: string
+        default: ubuntu-latest
+    outputs:
+      status:
+        description: PASS, FAIL or SKIPPED.
+        value: ${{ jobs.smoke.outputs.status }}
+      url:
+        description: The preview URL that was checked.
+        value: ${{ jobs.smoke.outputs.url }}
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name == 'deployment_status'
+      && github.event.deployment_status.state == 'success'
+      && (inputs.environment == '' || github.event.deployment.environment == inputs.environment)
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 15
+    outputs:
+      status: ${{ steps.smoke.outputs.status }}
+      url: ${{ steps.smoke.outputs.ready_url }}
+    steps:
+      - name: Smoke the preview
+        id: smoke
+        uses: khawjaahmad/github-workflows/smoke@v1.4.0 # zizmor: ignore[unpinned-uses]
+        env:
+          PREVIEW_URL: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+        with:
+          ready_url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          ready_timeout: ${{ inputs.ready_timeout }}
+          routes: ${{ inputs.routes }}
+          commands: ${{ inputs.commands }}
+          fail_on: ${{ inputs.fail_on }}
