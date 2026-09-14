@@ -77,5 +77,7 @@ Outputs: `status` and `package`.
 Booting the emulator takes two to five minutes on a cold run; the checks themselves take
 under a minute plus the monkey and the flows. Everything runs on Linux minutes.
 
-This action has no self-test in this repository because there is no APK to test with. The
-Python behind it is unit-tested against a fake `adb`; the first real run is the consumer's.
+This repository's `checks.yml` runs the action on every pull request against a fixture app,
+downloaded from this repository's `test-fixtures` pre-release and pinned by SHA-256, with a
+selector-free Maestro flow. The APK is kept out of git so consumers of the actions never
+download it. The Python behind it is also unit-tested against a fake `adb`.

@@ -1,0 +1,6 @@
+# Selector-free on purpose: this flow only proves Maestro runs inside Mobile Smoke.
+appId: com.ahmad.trolling
+---
+- launchApp
+- waitForAnimationToEnd
+- takeScreenshot: maestro-launch
